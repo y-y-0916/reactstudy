@@ -1,0 +1,931 @@
+= フェーズ3: Next.jsのAPI・データ取得 - 詳細解説
+:toc:
+:toclevels: 4
+:source-highlighter: highlight.js
+
+== 3.2 データ取得とAPI
+
+=== Server Componentsの理解
+
+Next.js 13以降では、デフォルトでServer Componentsが使用されます。これにより、サーバーサイドでデータを取得し、HTMLとして配信できます。
+
+==== 基本的なServer Component
+
+[source,typescript]
+----
+// src/app/posts/page.tsx
+interface Post {
+  id: number;
+  title: string;
+  body: string;
+  userId: number;
+}
+
+// Server Componentでのデータ取得
+async function getPosts(): Promise<Post[]> {
+  const res = await fetch('https://jsonplaceholder.typicode.com/posts', {
+    // Next.js特有のキャッシュオプション
+    next: { revalidate: 3600 } // 1時間キャッシュ
+  });
+  
+  if (!res.ok) {
+    throw new Error('Failed to fetch posts');
+  }
+  
+  return res.json();
+}
+
+export default async function PostsPage() {
+  const posts = await getPosts();
+
+  return (
+    <div>
+      <h1 className="text-3xl font-bold mb-8">投稿一覧</h1>
+      <div className="grid gap-6">
+        {posts.slice(0, 10).map(post => (
+          <article key={post.id} className="border rounded-lg p-6">
+            <h2 className="text-xl font-semibold mb-3">{post.title}</h2>
+            <p className="text-gray-600">{post.body}</p>
+            <div className="mt-4">
+              <a
+                href={`/posts/${post.id}`}
+                className="text-blue-600 hover:underline"
+              >
+                詳細を見る →
+              </a>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+----
+
+**Server Componentsの特徴:**
+
+* **サーバーサイドレンダリング**: HTMLがサーバーで生成される
+* **直接データベースアクセス**: APIを介さずにデータベースに直接アクセス可能
+* **SEOフレンドリー**: 検索エンジンがコンテンツをクロール可能
+* **バンドルサイズ削減**: クライアントに送信されるJavaScriptが少ない
+
+==== エラーハンドリングとローディング
+
+[source,typescript]
+----
+// src/app/posts/[id]/page.tsx
+interface PostPageProps {
+  params: {
+    id: string;
+  };
+}
+
+interface Post {
+  id: number;
+  title: string;
+  body: string;
+  userId: number;
+}
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+  website: string;
+}
+
+async function getPost(id: string): Promise<Post> {
+  const res = await fetch(`https://jsonplaceholder.typicode.com/posts/${id}`, {
+    next: { revalidate: 300 } // 5分キャッシュ
+  });
+  
+  if (!res.ok) {
+    throw new Error(`Failed to fetch post ${id}`);
+  }
+  
+  return res.json();
+}
+
+async function getUser(userId: number): Promise<User> {
+  const res = await fetch(`https://jsonplaceholder.typicode.com/users/${userId}`, {
+    next: { revalidate: 3600 } // 1時間キャッシュ
+  });
+  
+  if (!res.ok) {
+    throw new Error(`Failed to fetch user ${userId}`);
+  }
+  
+  return res.json();
+}
+
+export default async function PostPage({ params }: PostPageProps) {
+  // 並列でデータを取得
+  const postPromise = getPost(params.id);
+  const post = await postPromise;
+  const user = await getUser(post.userId);
+
+  return (
+    <article className="max-w-3xl mx-auto">
+      <header className="mb-8">
+        <h1 className="text-3xl font-bold mb-4">{post.title}</h1>
+        <div className="flex items-center space-x-4 text-gray-600">
+          <span>投稿者: {user.name}</span>
+          <span>•</span>
+          <a
+            href={`http://${user.website}`}
+            className="text-blue-600 hover:underline"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {user.website}
+          </a>
+        </div>
+      </header>
+      
+      <div className="prose prose-lg max-w-none">
+        <p>{post.body}</p>
+      </div>
+      
+      <footer className="mt-12 pt-8 border-t">
+        <div className="flex justify-between items-center">
+          <a
+            href="/posts"
+            className="text-blue-600 hover:underline"
+          >
+            ← 投稿一覧に戻る
+          </a>
+          <div className="text-sm text-gray-500">
+            投稿ID: {post.id}
+          </div>
+        </div>
+      </footer>
+    </article>
+  );
+}
+
+// メタデータの動的生成
+export async function generateMetadata({ params }: PostPageProps) {
+  const post = await getPost(params.id);
+  
+  return {
+    title: post.title,
+    description: post.body.substring(0, 160),
+  };
+}
+----
+
+=== Client Componentsの理解
+
+インタラクティブな機能が必要な場合は、Client Componentsを使用します。
+
+==== インタラクティブなコンポーネント
+
+[source,typescript]
+----
+// src/components/CommentSection.tsx
+'use client'
+
+import { useState, useEffect } from 'react';
+
+interface Comment {
+  id: number;
+  postId: number;
+  name: string;
+  email: string;
+  body: string;
+}
+
+interface CommentSectionProps {
+  postId: number;
+}
+
+export default function CommentSection({ postId }: CommentSectionProps) {
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showComments, setShowComments] = useState(false);
+  const [newComment, setNewComment] = useState({
+    name: '',
+    email: '',
+    body: ''
+  });
+
+  useEffect(() => {
+    if (showComments) {
+      fetchComments();
+    }
+  }, [showComments, postId]);
+
+  const fetchComments = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`https://jsonplaceholder.typicode.com/posts/${postId}/comments`);
+      const data = await response.json();
+      setComments(data);
+    } catch (error) {
+      console.error('コメントの取得に失敗しました:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!newComment.name || !newComment.email || !newComment.body) {
+      alert('すべての項目を入力してください');
+      return;
+    }
+
+    try {
+      const response = await fetch('https://jsonplaceholder.typicode.com/comments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...newComment,
+          postId,
+        }),
+      });
+
+      if (response.ok) {
+        const newCommentData = await response.json();
+        setComments(prev => [newCommentData, ...prev]);
+        setNewComment({ name: '', email: '', body: '' });
+        alert('コメントが投稿されました！');
+      }
+    } catch (error) {
+      console.error('コメントの投稿に失敗しました:', error);
+      alert('コメントの投稿に失敗しました');
+    }
+  };
+
+  return (
+    <div className="mt-12 pt-8 border-t">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold">コメント</h2>
+        <button
+          onClick={() => setShowComments(!showComments)}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+        >
+          {showComments ? 'コメントを隠す' : 'コメントを表示'}
+        </button>
+      </div>
+
+      {showComments && (
+        <>
+          {/* コメント投稿フォーム */}
+          <form onSubmit={handleSubmit} className="mb-8 p-6 bg-gray-50 rounded-lg">
+            <h3 className="text-lg font-semibold mb-4">コメントを投稿</h3>
+            <div className="grid md:grid-cols-2 gap-4 mb-4">
+              <input
+                type="text"
+                placeholder="お名前"
+                value={newComment.name}
+                onChange={(e) => setNewComment(prev => ({ ...prev, name: e.target.value }))}
+                className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="email"
+                placeholder="メールアドレス"
+                value={newComment.email}
+                onChange={(e) => setNewComment(prev => ({ ...prev, email: e.target.value }))}
+                className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <textarea
+              placeholder="コメント内容"
+              value={newComment.body}
+              onChange={(e) => setNewComment(prev => ({ ...prev, body: e.target.value }))}
+              rows={4}
+              className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+            />
+            <button
+              type="submit"
+              className="px-6 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+            >
+              コメントを投稿
+            </button>
+          </form>
+
+          {/* コメント一覧 */}
+          {loading ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+              <p className="mt-2 text-gray-600">コメントを読み込み中...</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {comments.map(comment => (
+                <div key={comment.id} className="border rounded-lg p-6">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h4 className="font-semibold">{comment.name}</h4>
+                      <p className="text-sm text-gray-600">{comment.email}</p>
+                    </div>
+                    <span className="text-xs text-gray-500">#{comment.id}</span>
+                  </div>
+                  <p className="text-gray-800">{comment.body}</p>
+                </div>
+              ))}
+              {comments.length === 0 && (
+                <p className="text-center text-gray-600 py-8">
+                  まだコメントがありません。最初のコメントを投稿しませんか？
+                </p>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+----
+
+=== API Routesの作成
+
+Next.jsのAPI Routesを使用して、バックエンドAPIを作成できます。
+
+==== 基本的なAPI Route
+
+[source,typescript]
+----
+// src/app/api/posts/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+
+// サンプルデータ（実際の開発ではデータベースを使用）
+const posts = [
+  {
+    id: 1,
+    title: 'Reactの基本概念',
+    content: 'Reactは宣言的なUIライブラリです...',
+    author: 'React太郎',
+    createdAt: '2024-01-15T10:00:00Z',
+    tags: ['React', '基礎']
+  },
+  {
+    id: 2,
+    title: 'Next.jsの魅力',
+    content: 'Next.jsはReactベースのフルスタックフレームワークです...',
+    author: 'Next花子',
+    createdAt: '2024-01-20T14:30:00Z',
+    tags: ['Next.js', 'フルスタック']
+  }
+];
+
+// GET /api/posts
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const tag = searchParams.get('tag');
+  const limit = searchParams.get('limit');
+
+  let filteredPosts = posts;
+
+  // タグでフィルタリング
+  if (tag) {
+    filteredPosts = posts.filter(post => 
+      post.tags.some(postTag => postTag.toLowerCase().includes(tag.toLowerCase()))
+    );
+  }
+
+  // 件数制限
+  if (limit) {
+    const limitNum = parseInt(limit, 10);
+    if (!isNaN(limitNum)) {
+      filteredPosts = filteredPosts.slice(0, limitNum);
+    }
+  }
+
+  return NextResponse.json({
+    posts: filteredPosts,
+    total: filteredPosts.length,
+    timestamp: new Date().toISOString()
+  });
+}
+
+// POST /api/posts
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    
+    // バリデーション
+    const { title, content, author, tags } = body;
+    if (!title || !content || !author) {
+      return NextResponse.json(
+        { error: 'title, content, authorは必須項目です' },
+        { status: 400 }
+      );
+    }
+
+    // 新しい投稿を作成
+    const newPost = {
+      id: posts.length + 1,
+      title,
+      content,
+      author,
+      tags: tags || [],
+      createdAt: new Date().toISOString()
+    };
+
+    posts.push(newPost);
+
+    return NextResponse.json(
+      { message: '投稿が作成されました', post: newPost },
+      { status: 201 }
+    );
+
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'リクエストの処理中にエラーが発生しました' },
+      { status: 500 }
+    );
+  }
+}
+----
+
+==== 動的API Route
+
+[source,typescript]
+----
+// src/app/api/posts/[id]/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+
+interface RouteParams {
+  params: {
+    id: string;
+  };
+}
+
+// サンプルデータ（実際の開発ではデータベースを使用）
+const posts = [
+  {
+    id: 1,
+    title: 'Reactの基本概念',
+    content: 'Reactは宣言的なUIライブラリです。コンポーネントベースで開発を行い、仮想DOMによって効率的な更新を実現します。',
+    author: 'React太郎',
+    createdAt: '2024-01-15T10:00:00Z',
+    tags: ['React', '基礎'],
+    views: 150
+  },
+  {
+    id: 2,
+    title: 'Next.jsの魅力',
+    content: 'Next.jsはReactベースのフルスタックフレームワークです。SSR、SSG、API Routesなど多くの機能を提供します。',
+    author: 'Next花子',
+    createdAt: '2024-01-20T14:30:00Z',
+    tags: ['Next.js', 'フルスタック'],
+    views: 89
+  }
+];
+
+// GET /api/posts/[id]
+export async function GET(request: NextRequest, { params }: RouteParams) {
+  const id = parseInt(params.id, 10);
+  
+  if (isNaN(id)) {
+    return NextResponse.json(
+      { error: '無効なIDです' },
+      { status: 400 }
+    );
+  }
+
+  const post = posts.find(p => p.id === id);
+  
+  if (!post) {
+    return NextResponse.json(
+      { error: '投稿が見つかりません' },
+      { status: 404 }
+    );
+  }
+
+  // ビュー数を増加（実際の開発ではデータベースで更新）
+  post.views += 1;
+
+  return NextResponse.json({ post });
+}
+
+// PUT /api/posts/[id]
+export async function PUT(request: NextRequest, { params }: RouteParams) {
+  const id = parseInt(params.id, 10);
+  
+  if (isNaN(id)) {
+    return NextResponse.json(
+      { error: '無効なIDです' },
+      { status: 400 }
+    );
+  }
+
+  const postIndex = posts.findIndex(p => p.id === id);
+  
+  if (postIndex === -1) {
+    return NextResponse.json(
+      { error: '投稿が見つかりません' },
+      { status: 404 }
+    );
+  }
+
+  try {
+    const body = await request.json();
+    const { title, content, tags } = body;
+
+    // 部分的な更新をサポート
+    if (title !== undefined) posts[postIndex].title = title;
+    if (content !== undefined) posts[postIndex].content = content;
+    if (tags !== undefined) posts[postIndex].tags = tags;
+
+    return NextResponse.json({
+      message: '投稿が更新されました',
+      post: posts[postIndex]
+    });
+
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'リクエストの処理中にエラーが発生しました' },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE /api/posts/[id]
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  const id = parseInt(params.id, 10);
+  
+  if (isNaN(id)) {
+    return NextResponse.json(
+      { error: '無効なIDです' },
+      { status: 400 }
+    );
+  }
+
+  const postIndex = posts.findIndex(p => p.id === id);
+  
+  if (postIndex === -1) {
+    return NextResponse.json(
+      { error: '投稿が見つかりません' },
+      { status: 404 }
+    );
+  }
+
+  const deletedPost = posts.splice(postIndex, 1)[0];
+
+  return NextResponse.json({
+    message: '投稿が削除されました',
+    post: deletedPost
+  });
+}
+----
+
+==== ミドルウェアの使用
+
+[source,typescript]
+----
+// src/app/api/posts/[id]/comments/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+
+interface Comment {
+  id: number;
+  postId: number;
+  author: string;
+  content: string;
+  createdAt: string;
+}
+
+// サンプルデータ
+const comments: Comment[] = [
+  {
+    id: 1,
+    postId: 1,
+    author: 'コメント太郎',
+    content: 'とても参考になりました！',
+    createdAt: '2024-01-16T09:00:00Z'
+  }
+];
+
+// 認証チェック（簡易版）
+function checkAuth(request: NextRequest) {
+  const authHeader = request.headers.get('authorization');
+  // 実際の開発では、JWTトークンの検証などを行う
+  return authHeader && authHeader.startsWith('Bearer ');
+}
+
+// GET /api/posts/[id]/comments
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  const postId = parseInt(params.id, 10);
+  
+  if (isNaN(postId)) {
+    return NextResponse.json(
+      { error: '無効な投稿IDです' },
+      { status: 400 }
+    );
+  }
+
+  const postComments = comments.filter(comment => comment.postId === postId);
+  
+  return NextResponse.json({
+    comments: postComments,
+    total: postComments.length
+  });
+}
+
+// POST /api/posts/[id]/comments
+export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+  // 認証チェック
+  if (!checkAuth(request)) {
+    return NextResponse.json(
+      { error: '認証が必要です' },
+      { status: 401 }
+    );
+  }
+
+  const postId = parseInt(params.id, 10);
+  
+  if (isNaN(postId)) {
+    return NextResponse.json(
+      { error: '無効な投稿IDです' },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const body = await request.json();
+    const { author, content } = body;
+
+    if (!author || !content) {
+      return NextResponse.json(
+        { error: 'authorとcontentは必須項目です' },
+        { status: 400 }
+      );
+    }
+
+    const newComment: Comment = {
+      id: comments.length + 1,
+      postId,
+      author,
+      content,
+      createdAt: new Date().toISOString()
+    };
+
+    comments.push(newComment);
+
+    return NextResponse.json(
+      { message: 'コメントが投稿されました', comment: newComment },
+      { status: 201 }
+    );
+
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'リクエストの処理中にエラーが発生しました' },
+      { status: 500 }
+    );
+  }
+}
+----
+
+=== APIの使用例
+
+作成したAPIを使用するクライアントサイドのコンポーネント例：
+
+[source,typescript]
+----
+// src/components/PostManager.tsx
+'use client'
+
+import { useState, useEffect } from 'react';
+
+interface Post {
+  id: number;
+  title: string;
+  content: string;
+  author: string;
+  tags: string[];
+  createdAt: string;
+  views?: number;
+}
+
+export default function PostManager() {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [newPost, setNewPost] = useState({
+    title: '',
+    content: '',
+    author: '',
+    tags: ''
+  });
+
+  useEffect(() => {
+    fetchPosts();
+  }, []);
+
+  const fetchPosts = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/posts');
+      const data = await response.json();
+      setPosts(data.posts);
+    } catch (error) {
+      console.error('投稿の取得に失敗しました:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const createPost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!newPost.title || !newPost.content || !newPost.author) {
+      alert('すべての必須項目を入力してください');
+      return;
+    }
+
+    try {
+      setCreating(true);
+      const response = await fetch('/api/posts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...newPost,
+          tags: newPost.tags.split(',').map(tag => tag.trim()).filter(Boolean)
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setPosts(prev => [data.post, ...prev]);
+        setNewPost({ title: '', content: '', author: '', tags: '' });
+        alert('投稿が作成されました！');
+      } else {
+        const error = await response.json();
+        alert(`エラー: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('投稿の作成に失敗しました:', error);
+      alert('投稿の作成に失敗しました');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const deletePost = async (id: number) => {
+    if (!confirm('この投稿を削除しますか？')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/posts/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        setPosts(prev => prev.filter(post => post.id !== id));
+        alert('投稿が削除されました');
+      } else {
+        const error = await response.json();
+        alert(`エラー: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('投稿の削除に失敗しました:', error);
+      alert('投稿の削除に失敗しました');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="text-center py-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+        <p className="mt-2">投稿を読み込み中...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      <h1 className="text-3xl font-bold mb-8">投稿管理</h1>
+      
+      {/* 新規投稿フォーム */}
+      <form onSubmit={createPost} className="mb-12 p-6 border rounded-lg bg-gray-50">
+        <h2 className="text-xl font-semibold mb-4">新規投稿</h2>
+        <div className="grid md:grid-cols-2 gap-4 mb-4">
+          <input
+            type="text"
+            placeholder="タイトル *"
+            value={newPost.title}
+            onChange={(e) => setNewPost(prev => ({ ...prev, title: e.target.value }))}
+            className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+            required
+          />
+          <input
+            type="text"
+            placeholder="著者 *"
+            value={newPost.author}
+            onChange={(e) => setNewPost(prev => ({ ...prev, author: e.target.value }))}
+            className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+            required
+          />
+        </div>
+        <textarea
+          placeholder="内容 *"
+          value={newPost.content}
+          onChange={(e) => setNewPost(prev => ({ ...prev, content: e.target.value }))}
+          rows={4}
+          className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+          required
+        />
+        <input
+          type="text"
+          placeholder="タグ（カンマ区切り）"
+          value={newPost.tags}
+          onChange={(e) => setNewPost(prev => ({ ...prev, tags: e.target.value }))}
+          className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+        />
+        <button
+          type="submit"
+          disabled={creating}
+          className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+        >
+          {creating ? '作成中...' : '投稿を作成'}
+        </button>
+      </form>
+
+      {/* 投稿一覧 */}
+      <div className="space-y-6">
+        {posts.map(post => (
+          <article key={post.id} className="border rounded-lg p-6">
+            <div className="flex justify-between items-start mb-3">
+              <h2 className="text-xl font-semibold">{post.title}</h2>
+              <button
+                onClick={() => deletePost(post.id)}
+                className="text-red-600 hover:text-red-800 text-sm"
+              >
+                削除
+              </button>
+            </div>
+            <p className="text-gray-600 mb-3">{post.content}</p>
+            <div className="flex justify-between items-center text-sm text-gray-500">
+              <div>
+                <span>著者: {post.author}</span>
+                {post.views && <span className="ml-4">閲覧数: {post.views}</span>}
+              </div>
+              <div className="flex space-x-2">
+                {post.tags.map(tag => (
+                  <span key={tag} className="px-2 py-1 bg-blue-100 text-blue-800 rounded">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </article>
+        ))}
+        {posts.length === 0 && (
+          <p className="text-center text-gray-600 py-8">
+            まだ投稿がありません。最初の投稿を作成しませんか？
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+----
+
+== 実践演習
+
+=== 演習7: Server ComponentとClient Componentの組み合わせ
+
+記事ページにServer ComponentとClient Componentを組み合わせて実装：
+
+[source,typescript]
+----
+// src/app/articles/[id]/page.tsx
+// TODO: 以下を実装してください
+// 1. Server Componentで記事データを取得
+// 2. Client Componentでコメント機能を実装
+// 3. いいね機能の追加
+// 4. 共有ボタンの実装
+----
+
+=== 演習8: 完全なCRUD API
+
+記事の完全なCRUD操作を行うAPIを実装：
+
+[source,typescript]
+----
+// src/app/api/articles/route.ts
+// TODO: 以下の機能を実装してください
+// 1. 記事の検索・フィルタリング機能
+// 2. ページネーション
+// 3. 並び替え機能
+// 4. バリデーション機能
+// 5. エラーハンドリング
+----
+
+**学習のポイント:**
+
+1. **Server vs Client**: いつどちらを使うべきかの判断基準
+2. **データフェッチング**: 効率的なデータ取得方法
+3. **API設計**: RESTfulなAPI設計の原則
+4. **エラーハンドリング**: 適切なHTTPステータスコードの使用
+5. **パフォーマンス**: キャッシュとリバリデーションの活用
+
+これらの概念を理解し、実際にAPIを作成して動作確認を行ってください。

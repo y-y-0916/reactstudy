@@ -1,0 +1,1642 @@
+= フェーズ5-7: デプロイメント - 詳細解説
+:toc:
+:toclevels: 4
+:source-highlighter: highlight.js
+
+== フェーズ5: デプロイメント準備
+
+=== 5.1 本番環境対応
+
+==== 環境変数の設定
+
+本番環境では、機密情報や環境固有の設定を環境変数で管理します。
+
+[source,typescript]
+----
+// .env.local（開発環境用）
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+NEXT_PUBLIC_API_URL=http://localhost:3000/api
+DATABASE_URL=postgresql://user:password@localhost:5432/blog_dev
+NEXTAUTH_SECRET=your-secret-key-here
+NEXTAUTH_URL=http://localhost:3000
+
+# Google Analytics
+NEXT_PUBLIC_GA_ID=G-XXXXXXXXXX
+
+# AWS S3（画像アップロード用）
+AWS_REGION=ap-northeast-1
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+AWS_S3_BUCKET_NAME=your-bucket-name
+----
+
+[source,typescript]
+----
+// .env.production（本番環境用）
+NEXT_PUBLIC_SITE_URL=https://yourdomain.com
+NEXT_PUBLIC_API_URL=https://yourdomain.com/api
+DATABASE_URL=postgresql://user:password@prod-db:5432/blog_prod
+NEXTAUTH_SECRET=super-secret-production-key
+NEXTAUTH_URL=https://yourdomain.com
+
+# Google Analytics
+NEXT_PUBLIC_GA_ID=G-YYYYYYYYYY
+
+# AWS S3
+AWS_REGION=ap-northeast-1
+AWS_ACCESS_KEY_ID=prod-access-key
+AWS_SECRET_ACCESS_KEY=prod-secret-key
+AWS_S3_BUCKET_NAME=prod-bucket-name
+----
+
+[source,typescript]
+----
+// src/lib/env.ts
+// 環境変数の型安全な管理
+import { z } from 'zod';
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  NEXT_PUBLIC_SITE_URL: z.string().url(),
+  NEXT_PUBLIC_API_URL: z.string().url(),
+  DATABASE_URL: z.string(),
+  NEXTAUTH_SECRET: z.string(),
+  NEXTAUTH_URL: z.string().url(),
+  NEXT_PUBLIC_GA_ID: z.string().optional(),
+  AWS_REGION: z.string(),
+  AWS_ACCESS_KEY_ID: z.string(),
+  AWS_SECRET_ACCESS_KEY: z.string(),
+  AWS_S3_BUCKET_NAME: z.string(),
+});
+
+export const env = envSchema.parse(process.env);
+
+// 使用例
+export const siteConfig = {
+  name: 'React学習ブログ',
+  description: 'ReactとNext.jsの学習記録',
+  url: env.NEXT_PUBLIC_SITE_URL,
+  apiUrl: env.NEXT_PUBLIC_API_URL,
+  author: '開発者名',
+  social: {
+    twitter: '@your_twitter',
+    github: 'your-github',
+  },
+};
+----
+
+==== エラーハンドリング
+
+[source,typescript]
+----
+// src/lib/error-handler.ts
+export class AppError extends Error {
+  public readonly statusCode: number;
+  public readonly isOperational: boolean;
+
+  constructor(message: string, statusCode: number = 500, isOperational: boolean = true) {
+    super(message);
+    this.statusCode = statusCode;
+    this.isOperational = isOperational;
+
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+export class ValidationError extends AppError {
+  constructor(message: string) {
+    super(message, 400);
+  }
+}
+
+export class NotFoundError extends AppError {
+  constructor(message: string = 'リソースが見つかりません') {
+    super(message, 404);
+  }
+}
+
+export class UnauthorizedError extends AppError {
+  constructor(message: string = '認証が必要です') {
+    super(message, 401);
+  }
+}
+
+// グローバルエラーハンドラー
+export function handleError(error: Error) {
+  if (error instanceof AppError && error.isOperational) {
+    // 予期されたエラー
+    console.error('Operational Error:', error.message);
+  } else {
+    // 予期しないエラー
+    console.error('System Error:', error);
+    
+    // 本番環境では外部サービス（Sentry等）にログ送信
+    if (process.env.NODE_ENV === 'production') {
+      // Sentry.captureException(error);
+    }
+  }
+}
+----
+
+[source,typescript]
+----
+// src/app/global-error.tsx
+'use client'
+
+import { useEffect } from 'react';
+
+export default function GlobalError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    console.error('Global error:', error);
+  }, [error]);
+
+  return (
+    <html>
+      <body>
+        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+          <div className="max-w-md mx-auto text-center">
+            <div className="bg-white p-8 rounded-lg shadow-md">
+              <div className="text-red-500 mb-4">
+                <svg className="mx-auto h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+              <h1 className="text-2xl font-bold text-gray-900 mb-4">
+                アプリケーションエラー
+              </h1>
+              <p className="text-gray-600 mb-6">
+                申し訳ございません。予期しないエラーが発生しました。
+              </p>
+              <div className="space-y-3">
+                <button
+                  onClick={reset}
+                  className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  再試行
+                </button>
+                <a
+                  href="/"
+                  className="block w-full px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+                >
+                  ホームに戻る
+                </a>
+              </div>
+              
+              {process.env.NODE_ENV === 'development' && (
+                <details className="mt-4 text-left">
+                  <summary className="cursor-pointer text-sm text-gray-500">
+                    エラー詳細（開発用）
+                  </summary>
+                  <pre className="mt-2 text-xs bg-gray-100 p-2 rounded overflow-auto">
+                    {error.message}
+                  </pre>
+                </details>
+              )}
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>
+  );
+}
+----
+
+==== 最適化
+
+[source,typescript]
+----
+// next.config.ts
+import type { NextConfig } from 'next';
+
+const nextConfig: NextConfig = {
+  // 画像最適化
+  images: {
+    domains: ['images.unsplash.com', 'your-domain.com'],
+    formats: ['image/webp', 'image/avif'],
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
+    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
+  },
+
+  // 実験的機能
+  experimental: {
+    optimizeCss: true,
+    optimizePackageImports: ['@heroicons/react'],
+  },
+
+  // セキュリティヘッダー
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'X-Frame-Options',
+            value: 'DENY',
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'origin-when-cross-origin',
+          },
+          {
+            key: 'Content-Security-Policy',
+            value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://www.googletagmanager.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:;",
+          },
+        ],
+      },
+    ];
+  },
+
+  // リダイレクト設定
+  async redirects() {
+    return [
+      {
+        source: '/home',
+        destination: '/',
+        permanent: true,
+      },
+    ];
+  },
+
+  // 圧縮設定
+  compress: true,
+
+  // 静的ファイルの最適化
+  poweredByHeader: false,
+  
+  // Bundle Analyzer（開発時のみ）
+  ...(process.env.ANALYZE === 'true' && {
+    webpack: (config: any) => {
+      config.plugins.push(
+        new (require('@next/bundle-analyzer'))({
+          enabled: true,
+        })
+      );
+      return config;
+    },
+  }),
+};
+
+export default nextConfig;
+----
+
+==== SEO対策
+
+[source,typescript]
+----
+// src/app/sitemap.ts
+import { MetadataRoute } from 'next';
+import { blogPosts } from '@/data/blog-data';
+import { siteConfig } from '@/lib/env';
+
+export default function sitemap(): MetadataRoute.Sitemap {
+  const staticPages = [
+    {
+      url: siteConfig.url,
+      lastModified: new Date(),
+      changeFrequency: 'daily' as const,
+      priority: 1,
+    },
+    {
+      url: `${siteConfig.url}/blog`,
+      lastModified: new Date(),
+      changeFrequency: 'daily' as const,
+      priority: 0.9,
+    },
+    {
+      url: `${siteConfig.url}/about`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly' as const,
+      priority: 0.8,
+    },
+  ];
+
+  const blogPages = blogPosts
+    .filter(post => post.status === 'published')
+    .map(post => ({
+      url: `${siteConfig.url}/blog/${post.slug}`,
+      lastModified: new Date(post.updatedAt),
+      changeFrequency: 'weekly' as const,
+      priority: 0.7,
+    }));
+
+  return [...staticPages, ...blogPages];
+}
+----
+
+[source,typescript]
+----
+// src/app/robots.ts
+import { MetadataRoute } from 'next';
+import { siteConfig } from '@/lib/env';
+
+export default function robots(): MetadataRoute.Robots {
+  return {
+    rules: [
+      {
+        userAgent: '*',
+        allow: '/',
+        disallow: ['/admin/', '/api/'],
+      },
+    ],
+    sitemap: `${siteConfig.url}/sitemap.xml`,
+  };
+}
+----
+
+[source,typescript]
+----
+// src/components/analytics/GoogleAnalytics.tsx
+'use client'
+
+import Script from 'next/script';
+import { env } from '@/lib/env';
+
+export default function GoogleAnalytics() {
+  if (!env.NEXT_PUBLIC_GA_ID) {
+    return null;
+  }
+
+  return (
+    <>
+      <Script
+        src={`https://www.googletagmanager.com/gtag/js?id=${env.NEXT_PUBLIC_GA_ID}`}
+        strategy="afterInteractive"
+      />
+      <Script id="google-analytics" strategy="afterInteractive">
+        {`
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){dataLayer.push(arguments);}
+          gtag('js', new Date());
+          gtag('config', '${env.NEXT_PUBLIC_GA_ID}', {
+            page_title: document.title,
+            page_location: window.location.href,
+          });
+        `}
+      </Script>
+    </>
+  );
+}
+----
+
+=== 5.2 テスト
+
+==== 単体テストの作成
+
+[source,javascript]
+----
+// jest.config.js
+const nextJest = require('next/jest');
+
+const createJestConfig = nextJest({
+  dir: './',
+});
+
+const customJestConfig = {
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
+  testEnvironment: 'jest-environment-jsdom',
+  testPathIgnorePatterns: ['<rootDir>/.next/', '<rootDir>/node_modules/'],
+  collectCoverageFrom: [
+    'src/**/*.{js,jsx,ts,tsx}',
+    '!src/**/*.d.ts',
+    '!src/**/*.stories.{js,jsx,ts,tsx}',
+  ],
+  moduleNameMapping: {
+    '^@/(.*)$': '<rootDir>/src/$1',
+  },
+};
+
+module.exports = createJestConfig(customJestConfig);
+----
+
+[source,javascript]
+----
+// jest.setup.js
+import '@testing-library/jest-dom';
+
+// IntersectionObserver のモック
+global.IntersectionObserver = jest.fn().mockImplementation(() => ({
+  observe: jest.fn(),
+  unobserve: jest.fn(),
+  disconnect: jest.fn(),
+}));
+
+// matchMedia のモック
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: jest.fn().mockImplementation(query => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: jest.fn(),
+    removeListener: jest.fn(),
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+    dispatchEvent: jest.fn(),
+  })),
+});
+----
+
+[source,typescript]
+----
+// src/components/__tests__/Button.test.tsx
+import { render, screen, fireEvent } from '@testing-library/react';
+import Button from '@/components/ui/Button';
+
+describe('Button', () => {
+  it('正しくレンダリングされる', () => {
+    render(<Button>テストボタン</Button>);
+    expect(screen.getByRole('button', { name: 'テストボタン' })).toBeInTheDocument();
+  });
+
+  it('クリックイベントが正しく動作する', () => {
+    const mockClick = jest.fn();
+    render(<Button onClick={mockClick}>クリック</Button>);
+    
+    fireEvent.click(screen.getByRole('button'));
+    expect(mockClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('disabled状態で正しく動作する', () => {
+    const mockClick = jest.fn();
+    render(<Button onClick={mockClick} disabled>無効ボタン</Button>);
+    
+    const button = screen.getByRole('button');
+    expect(button).toBeDisabled();
+    
+    fireEvent.click(button);
+    expect(mockClick).not.toHaveBeenCalled();
+  });
+
+  it('バリアント別のスタイルが適用される', () => {
+    const { rerender } = render(<Button variant="secondary">セカンダリ</Button>);
+    expect(screen.getByRole('button')).toHaveClass('bg-gray-200');
+
+    rerender(<Button variant="destructive">削除</Button>);
+    expect(screen.getByRole('button')).toHaveClass('bg-red-600');
+  });
+});
+----
+
+[source,typescript]
+----
+// src/lib/__tests__/blog-utils.test.ts
+import { generateSlug, formatDate, calculateReadingTime } from '@/lib/blog-utils';
+
+describe('blog-utils', () => {
+  describe('generateSlug', () => {
+    it('日本語タイトルを正しいスラッグに変換する', () => {
+      expect(generateSlug('Reactの基本概念について')).toBe('react-no-kihon-gainen-ni-tsuite');
+      expect(generateSlug('Next.js App Router完全ガイド')).toBe('next-js-app-router-kanzen-gaido');
+    });
+
+    it('特殊文字を適切に処理する', () => {
+      expect(generateSlug('React & Next.js: 完全ガイド')).toBe('react-next-js-kanzen-gaido');
+      expect(generateSlug('Vue.js vs React - どちらを選ぶ？')).toBe('vue-js-vs-react-dochira-wo-erabu');
+    });
+  });
+
+  describe('formatDate', () => {
+    it('日付を正しい形式でフォーマットする', () => {
+      const date = new Date('2024-01-15T10:00:00Z');
+      expect(formatDate(date, 'ja-JP')).toBe('2024年1月15日');
+      expect(formatDate(date, 'en-US')).toBe('January 15, 2024');
+    });
+  });
+
+  describe('calculateReadingTime', () => {
+    it('読了時間を正しく計算する', () => {
+      const shortText = 'これは短いテキストです。'.repeat(50); // 約50語
+      expect(calculateReadingTime(shortText)).toBe(1);
+
+      const longText = 'これは長いテキストです。'.repeat(500); // 約500語
+      expect(calculateReadingTime(longText)).toBe(3);
+    });
+  });
+});
+----
+
+==== 統合テストの作成
+
+[source,typescript]
+----
+// src/__tests__/api/posts.test.ts
+import { createMocks } from 'node-mocks-http';
+import { GET, POST } from '@/app/api/posts/route';
+
+describe('/api/posts', () => {
+  describe('GET', () => {
+    it('記事一覧を正しく取得できる', async () => {
+      const { req } = createMocks({
+        method: 'GET',
+        url: '/api/posts',
+      });
+
+      const response = await GET(req as any);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.posts).toBeInstanceOf(Array);
+      expect(data.total).toBeGreaterThanOrEqual(0);
+    });
+
+    it('タグフィルターが正しく動作する', async () => {
+      const { req } = createMocks({
+        method: 'GET',
+        url: '/api/posts?tag=react',
+      });
+
+      const response = await GET(req as any);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      data.posts.forEach((post: any) => {
+        expect(post.tags.some((tag: any) => 
+          tag.slug.toLowerCase().includes('react')
+        )).toBe(true);
+      });
+    });
+  });
+
+  describe('POST', () => {
+    it('新しい記事を正しく作成できる', async () => {
+      const { req } = createMocks({
+        method: 'POST',
+        body: {
+          title: 'テスト記事',
+          content: 'これはテスト記事の内容です。',
+          author: 'テスト作成者',
+          tags: ['test', 'blog'],
+        },
+      });
+
+      const response = await POST(req as any);
+      const data = await response.json();
+
+      expect(response.status).toBe(201);
+      expect(data.post.title).toBe('テスト記事');
+      expect(data.post.author).toBe('テスト作成者');
+    });
+
+    it('必須項目が不足している場合はエラーを返す', async () => {
+      const { req } = createMocks({
+        method: 'POST',
+        body: {
+          title: 'テスト記事',
+          // contentとauthorが不足
+        },
+      });
+
+      const response = await POST(req as any);
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.error).toContain('必須項目');
+    });
+  });
+});
+----
+
+==== E2Eテストの作成
+
+[source,typescript]
+----
+// playwright.config.ts
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './e2e',
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: 'html',
+  use: {
+    baseURL: 'http://localhost:3000',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+  },
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
+    },
+    {
+      name: 'Mobile Chrome',
+      use: { ...devices['Pixel 5'] },
+    },
+  ],
+  webServer: {
+    command: 'npm run dev',
+    url: 'http://localhost:3000',
+    reuseExistingServer: !process.env.CI,
+  },
+});
+----
+
+[source,typescript]
+----
+// e2e/blog.spec.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('ブログ機能', () => {
+  test('ホームページが正しく表示される', async ({ page }) => {
+    await page.goto('/');
+    
+    // タイトルの確認
+    await expect(page).toHaveTitle(/React学習ブログ/);
+    
+    // ヘッダーナビゲーションの確認
+    await expect(page.getByRole('navigation')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'ブログ' })).toBeVisible();
+  });
+
+  test('ブログ一覧ページが正しく動作する', async ({ page }) => {
+    await page.goto('/blog');
+    
+    // 記事カードの表示確認
+    await expect(page.getByTestId('blog-post-card')).toHaveCount(6);
+    
+    // 検索機能のテスト
+    await page.getByPlaceholder('記事を検索').fill('React');
+    await page.getByRole('button', { name: '検索' }).click();
+    
+    // 検索結果の確認
+    await expect(page.getByText('React')).toBeVisible();
+  });
+
+  test('記事詳細ページが正しく表示される', async ({ page }) => {
+    await page.goto('/blog');
+    
+    // 最初の記事をクリック
+    await page.getByTestId('blog-post-card').first().click();
+    
+    // 記事詳細ページの確認
+    await expect(page.getByRole('article')).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    
+    // 目次の確認
+    await expect(page.getByTestId('table-of-contents')).toBeVisible();
+    
+    // いいねボタンのテスト
+    const likeButton = page.getByTestId('like-button');
+    const initialLikes = await likeButton.textContent();
+    await likeButton.click();
+    await expect(likeButton).not.toHaveText(initialLikes!);
+  });
+
+  test('レスポンシブデザインが正しく動作する', async ({ page }) => {
+    // モバイルビューポートに設定
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto('/blog');
+    
+    // モバイルメニューボタンの確認
+    await expect(page.getByTestId('mobile-menu-button')).toBeVisible();
+    
+    // メニューを開く
+    await page.getByTestId('mobile-menu-button').click();
+    await expect(page.getByTestId('mobile-menu')).toBeVisible();
+    
+    // 記事カードがモバイルレイアウトで表示されることを確認
+    const postCards = page.getByTestId('blog-post-card');
+    await expect(postCards.first()).toBeVisible();
+  });
+
+  test('検索機能が正しく動作する', async ({ page }) => {
+    await page.goto('/blog');
+    
+    // 検索ボックスに入力
+    await page.getByPlaceholder('記事を検索').fill('Next.js');
+    await page.keyboard.press('Enter');
+    
+    // URLパラメータの確認
+    expect(page.url()).toContain('search=Next.js');
+    
+    // 検索結果の確認
+    await expect(page.getByText('Next.js')).toBeVisible();
+    
+    // フィルターのクリア
+    await page.getByRole('button', { name: 'クリア' }).click();
+    expect(page.url()).not.toContain('search=');
+  });
+});
+----
+
+== フェーズ6: AWS EC2デプロイ
+
+=== 6.1 AWS基礎知識
+
+==== AWSアカウント作成とIAM設定
+
+[source,bash]
+----
+# AWS CLI のインストール
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+
+# AWS CLI の設定
+aws configure
+# AWS Access Key ID: YOUR_ACCESS_KEY
+# AWS Secret Access Key: YOUR_SECRET_KEY
+# Default region name: ap-northeast-1
+# Default output format: json
+
+# IAM ユーザーポリシーの例（最小権限）
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeImages",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeKeyPairs",
+        "ec2:RunInstances",
+        "ec2:TerminateInstances",
+        "ec2:CreateSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:CreateKeyPair"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+----
+
+=== 6.2 デプロイ実装
+
+==== EC2インスタンスの作成
+
+[source,bash]
+----
+# キーペアの作成
+aws ec2 create-key-pair \
+  --key-name blog-app-key \
+  --query 'KeyMaterial' \
+  --output text > blog-app-key.pem
+
+# キーファイルの権限設定
+chmod 400 blog-app-key.pem
+
+# セキュリティグループの作成
+aws ec2 create-security-group \
+  --group-name blog-app-sg \
+  --description "Security group for blog app"
+
+# HTTP(80), HTTPS(443), SSH(22) の許可
+aws ec2 authorize-security-group-ingress \
+  --group-name blog-app-sg \
+  --protocol tcp \
+  --port 22 \
+  --cidr 0.0.0.0/0
+
+aws ec2 authorize-security-group-ingress \
+  --group-name blog-app-sg \
+  --protocol tcp \
+  --port 80 \
+  --cidr 0.0.0.0/0
+
+aws ec2 authorize-security-group-ingress \
+  --group-name blog-app-sg \
+  --protocol tcp \
+  --port 443 \
+  --cidr 0.0.0.0/0
+
+aws ec2 authorize-security-group-ingress \
+  --group-name blog-app-sg \
+  --protocol tcp \
+  --port 3000 \
+  --cidr 0.0.0.0/0
+
+# EC2インスタンスの起動
+aws ec2 run-instances \
+  --image-id ami-0d52744d6551d851e \
+  --count 1 \
+  --instance-type t2.micro \
+  --key-name blog-app-key \
+  --security-groups blog-app-sg \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=blog-app-server}]'
+----
+
+==== サーバーセットアップスクリプト
+
+[source,bash]
+----
+#!/bin/bash
+# setup-server.sh - EC2インスタンス初期設定スクリプト
+
+# システムアップデート
+sudo yum update -y
+
+# Node.js のインストール（Node.js 18 LTS）
+curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
+sudo yum install -y nodejs
+
+# Git のインストール
+sudo yum install -y git
+
+# PM2 のインストール（プロセス管理）
+sudo npm install -g pm2
+
+# Nginx のインストール
+sudo amazon-linux-extras install nginx1 -y
+
+# Nginx の起動と自動起動設定
+sudo systemctl start nginx
+sudo systemctl enable nginx
+
+# Let's Encrypt のインストール（SSL証明書用）
+sudo yum install -y certbot python3-certbot-nginx
+
+# アプリケーション用ディレクトリの作成
+sudo mkdir -p /var/www/blog-app
+sudo chown ec2-user:ec2-user /var/www/blog-app
+
+# アプリケーションのクローン
+cd /var/www/blog-app
+git clone https://github.com/your-username/blog-app.git .
+
+# 依存関係のインストール
+npm ci --only=production
+
+# 環境変数ファイルの作成
+cat > .env.production << EOF
+NODE_ENV=production
+NEXT_PUBLIC_SITE_URL=https://yourdomain.com
+NEXT_PUBLIC_API_URL=https://yourdomain.com/api
+# その他の環境変数...
+EOF
+
+# アプリケーションのビルド
+npm run build
+
+# PM2 でアプリケーションを起動
+pm2 start npm --name "blog-app" -- start
+pm2 save
+pm2 startup
+
+echo "サーバーセットアップが完了しました"
+----
+
+==== Nginx設定
+
+[source,nginx]
+----
+# /etc/nginx/conf.d/blog-app.conf
+server {
+    listen 80;
+    server_name yourdomain.com www.yourdomain.com;
+
+    # HTTP から HTTPS へのリダイレクト
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name yourdomain.com www.yourdomain.com;
+
+    # SSL 証明書設定（Let's Encrypt）
+    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+
+    # セキュリティヘッダー
+    add_header X-Frame-Options DENY;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Referrer-Policy "origin-when-cross-origin";
+
+    # Gzip 圧縮
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
+
+    # 静的ファイルの設定
+    location /_next/static/ {
+        alias /var/www/blog-app/.next/static/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location /images/ {
+        alias /var/www/blog-app/public/images/;
+        expires 1y;
+        add_header Cache-Control "public";
+    }
+
+    # アプリケーションへのプロキシ
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 86400;
+    }
+
+    # ヘルスチェック
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+}
+----
+
+==== デプロイスクリプト
+
+[source,bash]
+----
+#!/bin/bash
+# deploy.sh - デプロイメントスクリプト
+
+set -e
+
+SERVER_IP="your-ec2-ip"
+KEY_PATH="./blog-app-key.pem"
+APP_DIR="/var/www/blog-app"
+
+echo "🚀 デプロイを開始します..."
+
+# リモートサーバーでの作業
+ssh -i $KEY_PATH ec2-user@$SERVER_IP << 'ENDSSH'
+    set -e
+    
+    echo "📥 最新のコードを取得中..."
+    cd /var/www/blog-app
+    git fetch origin
+    git reset --hard origin/main
+    
+    echo "📦 依存関係を更新中..."
+    npm ci --only=production
+    
+    echo "🔨 アプリケーションをビルド中..."
+    npm run build
+    
+    echo "🔄 アプリケーションを再起動中..."
+    pm2 restart blog-app
+    pm2 save
+    
+    echo "🧹 古いファイルを清理中..."
+    pm2 flush blog-app
+    
+    echo "✅ デプロイが完了しました"
+ENDSSH
+
+echo "🎉 デプロイが正常に完了しました！"
+echo "サイト URL: https://yourdomain.com"
+----
+
+==== ドメイン設定とSSL証明書
+
+[source,bash]
+----
+#!/bin/bash
+# setup-ssl.sh - SSL証明書設定スクリプト
+
+DOMAIN="yourdomain.com"
+EMAIL="your-email@example.com"
+
+echo "🔒 SSL証明書を設定中..."
+
+# Let's Encrypt で SSL証明書を取得
+sudo certbot --nginx \
+  --non-interactive \
+  --agree-tos \
+  --email $EMAIL \
+  --domains $DOMAIN,www.$DOMAIN
+
+# 証明書の自動更新設定
+echo "0 12 * * * /usr/bin/certbot renew --quiet" | sudo crontab -
+
+# Nginx の再起動
+sudo systemctl restart nginx
+
+echo "✅ SSL証明書の設定が完了しました"
+echo "サイト URL: https://$DOMAIN"
+----
+
+== フェーズ7: サーバーレス移行
+
+=== 7.1 サーバーレス基礎
+
+==== Vercelへのデプロイ
+
+[source,json]
+----
+// vercel.json
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "regions": ["nrt1"],
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "build": {
+    "env": {
+      "NEXT_PUBLIC_SITE_URL": "https://your-app.vercel.app",
+      "NEXT_PUBLIC_API_URL": "https://your-app.vercel.app/api"
+    }
+  },
+  "functions": {
+    "src/app/api/**/*.ts": {
+      "maxDuration": 30
+    }
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/home",
+      "destination": "/",
+      "permanent": true
+    }
+  ]
+}
+----
+
+[source,bash]
+----
+# Vercel CLI のインストール
+npm i -g vercel
+
+# Vercel にログイン
+vercel login
+
+# プロジェクトのセットアップ
+vercel
+
+# 環境変数の設定
+vercel env add NEXT_PUBLIC_SITE_URL production
+vercel env add DATABASE_URL production
+vercel env add NEXTAUTH_SECRET production
+
+# デプロイ
+vercel --prod
+----
+
+=== 7.2 アーキテクチャ移行
+
+==== AWS SAM テンプレート
+
+[source,yaml]
+----
+# template.yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Blog App Serverless Architecture
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: nodejs18.x
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, staging, prod]
+
+Resources:
+  # DynamoDB Table
+  BlogPostsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'blog-posts-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: slug
+          AttributeType: S
+        - AttributeName: publishedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: slug-index
+          KeySchema:
+            - AttributeName: slug
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: published-index
+          KeySchema:
+            - AttributeName: publishedAt
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  # API Gateway
+  BlogApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Environment
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+
+  # Lambda Functions
+  GetPostsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/lambda/
+      Handler: posts.getPosts
+      Environment:
+        Variables:
+          POSTS_TABLE: !Ref BlogPostsTable
+      Events:
+        GetPosts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /posts
+            Method: get
+
+  GetPostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/lambda/
+      Handler: posts.getPost
+      Environment:
+        Variables:
+          POSTS_TABLE: !Ref BlogPostsTable
+      Events:
+        GetPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /posts/{id}
+            Method: get
+
+  CreatePostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/lambda/
+      Handler: posts.createPost
+      Environment:
+        Variables:
+          POSTS_TABLE: !Ref BlogPostsTable
+      Events:
+        CreatePost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /posts
+            Method: post
+
+  # S3 Bucket for Static Assets
+  StaticAssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'blog-static-assets-${Environment}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  # CloudFront Distribution
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingOptimized
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt StaticAssetsBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${BlogApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+  
+  StaticAssetsUrl:
+    Description: "CloudFront distribution URL"
+    Value: !GetAtt CloudFrontDistribution.DomainName
+----
+
+==== Lambda 関数の実装
+
+[source,typescript]
+----
+// src/lambda/posts.ts
+import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, ScanCommand, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+
+const client = new DynamoDBClient({ region: process.env.AWS_REGION });
+const dynamo = DynamoDBDocumentClient.from(client);
+const tableName = process.env.POSTS_TABLE!;
+
+export const getPosts = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+  try {
+    const { tag, category, limit = '10' } = event.queryStringParameters || {};
+    
+    const command = new ScanCommand({
+      TableName: tableName,
+      FilterExpression: 'attribute_exists(id)',
+      Limit: parseInt(limit),
+    });
+
+    const result = await dynamo.send(command);
+    let posts = result.Items || [];
+
+    // フィルタリング
+    if (tag) {
+      posts = posts.filter(post => 
+        post.tags && post.tags.some((t: any) => t.slug === tag)
+      );
+    }
+
+    if (category) {
+      posts = posts.filter(post => post.category && post.category.slug === category);
+    }
+
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+      body: JSON.stringify({
+        posts,
+        total: posts.length,
+        timestamp: new Date().toISOString(),
+      }),
+    };
+  } catch (error) {
+    console.error('Error getting posts:', error);
+    return {
+      statusCode: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+      body: JSON.stringify({
+        error: 'Internal server error',
+      }),
+    };
+  }
+};
+
+export const getPost = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+  try {
+    const { id } = event.pathParameters || {};
+    
+    if (!id) {
+      return {
+        statusCode: 400,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+        body: JSON.stringify({
+          error: 'Post ID is required',
+        }),
+      };
+    }
+
+    const command = new GetCommand({
+      TableName: tableName,
+      Key: { id },
+    });
+
+    const result = await dynamo.send(command);
+    
+    if (!result.Item) {
+      return {
+        statusCode: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+        body: JSON.stringify({
+          error: 'Post not found',
+        }),
+      };
+    }
+
+    // ビューカウントを増加
+    const updateCommand = new PutCommand({
+      TableName: tableName,
+      Item: {
+        ...result.Item,
+        viewCount: (result.Item.viewCount || 0) + 1,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+
+    await dynamo.send(updateCommand);
+
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+      body: JSON.stringify({
+        post: {
+          ...result.Item,
+          viewCount: (result.Item.viewCount || 0) + 1,
+        },
+      }),
+    };
+  } catch (error) {
+    console.error('Error getting post:', error);
+    return {
+      statusCode: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+      body: JSON.stringify({
+        error: 'Internal server error',
+      }),
+    };
+  }
+};
+
+export const createPost = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+  try {
+    const body = JSON.parse(event.body || '{}');
+    const { title, content, author, category, tags = [] } = body;
+
+    if (!title || !content || !author) {
+      return {
+        statusCode: 400,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+        body: JSON.stringify({
+          error: 'Title, content, and author are required',
+        }),
+      };
+    }
+
+    const post = {
+      id: `post-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      title,
+      content,
+      author,
+      category,
+      tags,
+      slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      publishedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      status: 'published',
+      viewCount: 0,
+      likeCount: 0,
+    };
+
+    const command = new PutCommand({
+      TableName: tableName,
+      Item: post,
+    });
+
+    await dynamo.send(command);
+
+    return {
+      statusCode: 201,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+      body: JSON.stringify({
+        message: 'Post created successfully',
+        post,
+      }),
+    };
+  } catch (error) {
+    console.error('Error creating post:', error);
+    return {
+      statusCode: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+      body: JSON.stringify({
+        error: 'Internal server error',
+      }),
+    };
+  }
+};
+----
+
+==== デプロイスクリプト
+
+[source,bash]
+----
+#!/bin/bash
+# deploy-serverless.sh
+
+set -e
+
+ENVIRONMENT=${1:-dev}
+STACK_NAME="blog-app-${ENVIRONMENT}"
+
+echo "🚀 サーバーレスアプリケーションをデプロイ中... (環境: ${ENVIRONMENT})"
+
+# Lambda 関数のビルド
+echo "📦 Lambda 関数をビルド中..."
+cd src/lambda
+npm ci
+npm run build
+cd ../..
+
+# SAM ビルド
+echo "🔨 SAM アプリケーションをビルド中..."
+sam build
+
+# SAM デプロイ
+echo "☁️ AWS にデプロイ中..."
+sam deploy \
+  --stack-name $STACK_NAME \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides Environment=$ENVIRONMENT \
+  --no-confirm-changeset
+
+# スタック情報の取得
+echo "📊 デプロイ結果:"
+aws cloudformation describe-stacks \
+  --stack-name $STACK_NAME \
+  --query 'Stacks[0].Outputs' \
+  --output table
+
+echo "✅ デプロイが完了しました！"
+----
+
+== 実践演習
+
+=== 演習10: 完全なCI/CDパイプライン
+
+GitHub Actionsを使用したCI/CDパイプラインを構築してください：
+
+[source,yaml]
+----
+# .github/workflows/ci-cd.yml
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run linting
+      run: npm run lint
+    
+    - name: Run type checking
+      run: npm run type-check
+    
+    - name: Run unit tests
+      run: npm run test:unit
+    
+    - name: Run E2E tests
+      run: npm run test:e2e
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Deploy to Vercel (Staging)
+      uses: amondnet/vercel-action@v20
+      with:
+        vercel-token: ${{ secrets.VERCEL_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+
+  deploy-production:
+    name: Deploy to Production
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Deploy to Vercel (Production)
+      uses: amondnet/vercel-action@v20
+      with:
+        vercel-token: ${{ secrets.VERCEL_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+        vercel-args: '--prod'
+----
+
+### 実装チェックリスト
+
+**デプロイメント準備**
+- [ ] 環境変数の設定
+- [ ] エラーハンドリングの実装
+- [ ] パフォーマンス最適化
+- [ ] SEO対策の実装
+- [ ] セキュリティ設定
+
+**テスト**
+- [ ] 単体テストの作成
+- [ ] 統合テストの作成
+- [ ] E2Eテストの作成
+- [ ] パフォーマンステスト
+
+**AWS EC2デプロイ**
+- [ ] EC2インスタンスの設定
+- [ ] Nginxの設定
+- [ ] SSL証明書の設定
+- [ ] ドメインの設定
+- [ ] デプロイスクリプトの作成
+
+**サーバーレス移行**
+- [ ] Vercelデプロイの設定
+- [ ] AWS SAMテンプレートの作成
+- [ ] Lambda関数の実装
+- [ ] DynamoDBの設定
+- [ ] CloudFrontの設定
+
+**CI/CD**
+- [ ] GitHub Actionsの設定
+- [ ] 自動テストの実行
+- [ ] 自動デプロイの設定
+- [ ] 環境別デプロイの設定
+
+**学習のポイント:**
+
+1. **インフラストラクチャ**: AWSサービスの理解と活用
+2. **DevOps**: CI/CDパイプラインの構築
+3. **セキュリティ**: 本番環境でのセキュリティ対策
+4. **監視**: アプリケーションの監視とログ管理
+5. **スケーラビリティ**: 負荷に応じたスケーリング戦略
+
+これらの実装を通じて、本格的なWebアプリケーションの運用に必要なスキルを習得してください。

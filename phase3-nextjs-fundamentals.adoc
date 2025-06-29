@@ -1,0 +1,571 @@
+= フェーズ3: Next.jsの理解 - 詳細解説
+:toc:
+:toclevels: 4
+:source-highlighter: highlight.js
+
+== 3.1 Next.jsの基本機能
+
+=== App Routerの理解
+
+Next.js 13以降で導入されたApp Routerは、`app`ディレクトリベースのファイルシステムルーティングです。
+
+==== 基本的なファイル構造
+
+```
+src/app/
+├── layout.tsx          # ルートレイアウト
+├── page.tsx           # ホームページ（/）
+├── loading.tsx        # ローディングUI
+├── error.tsx          # エラーUI
+├── not-found.tsx      # 404ページ
+├── about/
+│   └── page.tsx       # Aboutページ（/about）
+├── blog/
+│   ├── page.tsx       # ブログ一覧（/blog）
+│   ├── [slug]/
+│   │   └── page.tsx   # 個別記事（/blog/[slug]）
+│   └── category/
+│       └── [name]/
+│           └── page.tsx # カテゴリ別記事（/blog/category/[name]）
+└── api/
+    └── posts/
+        └── route.ts   # API Route
+```
+
+==== ルートレイアウト
+
+[source,typescript]
+----
+// src/app/layout.tsx
+import type { Metadata } from 'next'
+import { Inter } from 'next/font/google'
+import './globals.css'
+
+const inter = Inter({ subsets: ['latin'] })
+
+export const metadata: Metadata = {
+  title: 'React Study Blog',
+  description: 'React学習用のブログアプリケーション',
+}
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html lang="ja">
+      <body className={inter.className}>
+        <header className="bg-blue-600 text-white">
+          <div className="container mx-auto px-4 py-4">
+            <h1 className="text-2xl font-bold">React Study Blog</h1>
+            <nav className="mt-2">
+              <a href="/" className="mr-4 hover:underline">ホーム</a>
+              <a href="/about" className="mr-4 hover:underline">About</a>
+              <a href="/blog" className="mr-4 hover:underline">ブログ</a>
+            </nav>
+          </div>
+        </header>
+        <main className="container mx-auto px-4 py-8">
+          {children}
+        </main>
+        <footer className="bg-gray-800 text-white text-center py-4">
+          <p>&copy; 2024 React Study Blog. All rights reserved.</p>
+        </footer>
+      </body>
+    </html>
+  )
+}
+----
+
+**layout.tsxの重要ポイント:**
+
+* **Metadata**: SEOのためのメタデータを設定
+* **フォント最適化**: Next.jsのフォント最適化機能を使用
+* **グローバルレイアウト**: 全ページで共通のレイアウト
+* **children**: 各ページのコンテンツが挿入される場所
+
+=== ページルーティング
+
+==== 基本ページの作成
+
+[source,typescript]
+----
+// src/app/page.tsx（ホームページ）
+export default function HomePage() {
+  return (
+    <div>
+      <h1 className="text-3xl font-bold mb-6">React学習プロジェクトへようこそ</h1>
+      <div className="grid md:grid-cols-2 gap-6">
+        <div className="p-6 border rounded-lg">
+          <h2 className="text-xl font-semibold mb-3">学習目標</h2>
+          <ul className="list-disc list-inside space-y-2">
+            <li>Reactの基本概念を理解する</li>
+            <li>Next.jsでフルスタック開発を学ぶ</li>
+            <li>AWS EC2にデプロイする</li>
+            <li>サーバーレスアーキテクチャを構築する</li>
+          </ul>
+        </div>
+        <div className="p-6 border rounded-lg">
+          <h2 className="text-xl font-semibold mb-3">技術スタック</h2>
+          <ul className="list-disc list-inside space-y-2">
+            <li>React 18</li>
+            <li>Next.js 15</li>
+            <li>TypeScript</li>
+            <li>Tailwind CSS</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+----
+
+[source,typescript]
+----
+// src/app/about/page.tsx
+export default function AboutPage() {
+  return (
+    <div className="max-w-3xl mx-auto">
+      <h1 className="text-3xl font-bold mb-6">About</h1>
+      <div className="prose prose-lg">
+        <p className="mb-4">
+          このプロジェクトは、ReactとNext.jsを学習するための実践的なプロジェクトです。
+        </p>
+        <p className="mb-4">
+          基本的なコンポーネント作成から始まり、状態管理、API連携、
+          そして最終的には本格的なWebアプリケーションの構築を目指します。
+        </p>
+        <h2 className="text-2xl font-semibold mt-8 mb-4">学習の進め方</h2>
+        <ol className="list-decimal list-inside space-y-2">
+          <li>基本概念の理解</li>
+          <li>小さなコンポーネントの作成</li>
+          <li>状態管理の学習</li>
+          <li>API連携の実装</li>
+          <li>本格的なアプリケーション開発</li>
+        </ol>
+      </div>
+    </div>
+  );
+}
+----
+
+=== 動的ルーティング
+
+動的ルーティングを使用して、URLパラメータを基にページを生成できます。
+
+==== 基本的な動的ルート
+
+[source,typescript]
+----
+// src/app/blog/[slug]/page.tsx
+interface BlogPostPageProps {
+  params: {
+    slug: string;
+  };
+}
+
+// 記事データの型定義
+interface BlogPost {
+  slug: string;
+  title: string;
+  content: string;
+  publishedAt: string;
+  tags: string[];
+}
+
+// サンプルデータ（実際のプロジェクトではAPIやデータベースから取得）
+const blogPosts: BlogPost[] = [
+  {
+    slug: 'react-basics',
+    title: 'Reactの基本概念',
+    content: 'Reactは、ユーザーインターフェースを構築するためのJavaScriptライブラリです...',
+    publishedAt: '2024-01-15',
+    tags: ['React', '基礎'],
+  },
+  {
+    slug: 'nextjs-routing',
+    title: 'Next.jsのルーティング',
+    content: 'Next.jsのApp Routerは、ファイルシステムベースのルーティングを提供します...',
+    publishedAt: '2024-01-20',
+    tags: ['Next.js', 'ルーティング'],
+  },
+  {
+    slug: 'typescript-tips',
+    title: 'TypeScriptの便利な機能',
+    content: 'TypeScriptを使うことで、より安全で保守性の高いコードを書くことができます...',
+    publishedAt: '2024-01-25',
+    tags: ['TypeScript', 'Tips'],
+  },
+];
+
+export default function BlogPostPage({ params }: BlogPostPageProps) {
+  const post = blogPosts.find(p => p.slug === params.slug);
+
+  if (!post) {
+    return (
+      <div className="text-center py-12">
+        <h1 className="text-2xl font-bold text-gray-600">記事が見つかりません</h1>
+        <p className="mt-4">
+          <a href="/blog" className="text-blue-600 hover:underline">
+            ブログ一覧に戻る
+          </a>
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <article className="max-w-3xl mx-auto">
+      <header className="mb-8">
+        <h1 className="text-3xl font-bold mb-4">{post.title}</h1>
+        <div className="flex items-center space-x-4 text-gray-600">
+          <time>{new Date(post.publishedAt).toLocaleDateString('ja-JP')}</time>
+          <div className="flex space-x-2">
+            {post.tags.map(tag => (
+              <span
+                key={tag}
+                className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        </div>
+      </header>
+      <div className="prose prose-lg max-w-none">
+        {post.content.split('\n').map((paragraph, index) => (
+          <p key={index} className="mb-4">
+            {paragraph}
+          </p>
+        ))}
+      </div>
+      <footer className="mt-12 pt-8 border-t">
+        <a
+          href="/blog"
+          className="text-blue-600 hover:underline"
+        >
+          ← ブログ一覧に戻る
+        </a>
+      </footer>
+    </article>
+  );
+}
+----
+
+==== ネストした動的ルート
+
+[source,typescript]
+----
+// src/app/blog/category/[name]/page.tsx
+interface CategoryPageProps {
+  params: {
+    name: string;
+  };
+}
+
+const categories = {
+  'react': 'React',
+  'nextjs': 'Next.js',
+  'typescript': 'TypeScript',
+  'css': 'CSS・スタイリング',
+};
+
+export default function CategoryPage({ params }: CategoryPageProps) {
+  const categoryName = categories[params.name as keyof typeof categories];
+  
+  if (!categoryName) {
+    return (
+      <div className="text-center py-12">
+        <h1 className="text-2xl font-bold text-gray-600">カテゴリが見つかりません</h1>
+      </div>
+    );
+  }
+
+  // カテゴリに属する記事を取得（実際の開発では動的に取得）
+  const categoryPosts = blogPosts.filter(post => 
+    post.tags.some(tag => tag.toLowerCase() === params.name.toLowerCase())
+  );
+
+  return (
+    <div>
+      <h1 className="text-3xl font-bold mb-8">カテゴリ: {categoryName}</h1>
+      {categoryPosts.length === 0 ? (
+        <p className="text-gray-600">このカテゴリの記事はまだありません。</p>
+      ) : (
+        <div className="grid gap-6">
+          {categoryPosts.map(post => (
+            <article key={post.slug} className="border rounded-lg p-6">
+              <h2 className="text-xl font-semibold mb-2">
+                <a
+                  href={`/blog/${post.slug}`}
+                  className="text-blue-600 hover:underline"
+                >
+                  {post.title}
+                </a>
+              </h2>
+              <p className="text-gray-600 mb-3">
+                {post.content.substring(0, 150)}...
+              </p>
+              <div className="flex justify-between items-center">
+                <time className="text-sm text-gray-500">
+                  {new Date(post.publishedAt).toLocaleDateString('ja-JP')}
+                </time>
+                <div className="flex space-x-2">
+                  {post.tags.map(tag => (
+                    <span
+                      key={tag}
+                      className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+----
+
+=== レイアウトコンポーネント
+
+複数のページで共通のレイアウトを使用する場合のパターンです。
+
+==== セクション別レイアウト
+
+[source,typescript]
+----
+// src/app/blog/layout.tsx
+export default function BlogLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="max-w-6xl mx-auto">
+      <div className="grid lg:grid-cols-4 gap-8">
+        <aside className="lg:col-span-1">
+          <div className="sticky top-8">
+            <h2 className="text-lg font-semibold mb-4">カテゴリ</h2>
+            <nav className="space-y-2">
+              <a
+                href="/blog/category/react"
+                className="block px-3 py-2 rounded hover:bg-gray-100"
+              >
+                React
+              </a>
+              <a
+                href="/blog/category/nextjs"
+                className="block px-3 py-2 rounded hover:bg-gray-100"
+              >
+                Next.js
+              </a>
+              <a
+                href="/blog/category/typescript"
+                className="block px-3 py-2 rounded hover:bg-gray-100"
+              >
+                TypeScript
+              </a>
+              <a
+                href="/blog/category/css"
+                className="block px-3 py-2 rounded hover:bg-gray-100"
+              >
+                CSS・スタイリング
+              </a>
+            </nav>
+            
+            <h2 className="text-lg font-semibold mb-4 mt-8">最近の記事</h2>
+            <div className="space-y-3">
+              <article className="text-sm">
+                <h3 className="font-medium">
+                  <a href="/blog/react-basics" className="hover:text-blue-600">
+                    Reactの基本概念
+                  </a>
+                </h3>
+                <time className="text-gray-500">2024-01-15</time>
+              </article>
+              <article className="text-sm">
+                <h3 className="font-medium">
+                  <a href="/blog/nextjs-routing" className="hover:text-blue-600">
+                    Next.jsのルーティング
+                  </a>
+                </h3>
+                <time className="text-gray-500">2024-01-20</time>
+              </article>
+            </div>
+          </div>
+        </aside>
+        <main className="lg:col-span-3">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
+----
+
+==== ローディングUI
+
+[source,typescript]
+----
+// src/app/blog/loading.tsx
+export default function BlogLoading() {
+  return (
+    <div className="max-w-6xl mx-auto">
+      <div className="grid lg:grid-cols-4 gap-8">
+        {/* サイドバーのスケルトン */}
+        <aside className="lg:col-span-1">
+          <div className="space-y-4">
+            <div className="h-6 bg-gray-200 rounded animate-pulse"></div>
+            <div className="space-y-2">
+              {[1, 2, 3, 4].map(i => (
+                <div key={i} className="h-10 bg-gray-100 rounded animate-pulse"></div>
+              ))}
+            </div>
+          </div>
+        </aside>
+        
+        {/* メインコンテンツのスケルトン */}
+        <main className="lg:col-span-3">
+          <div className="space-y-6">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="border rounded-lg p-6">
+                <div className="h-6 bg-gray-200 rounded mb-4 animate-pulse"></div>
+                <div className="space-y-2 mb-4">
+                  <div className="h-4 bg-gray-100 rounded animate-pulse"></div>
+                  <div className="h-4 bg-gray-100 rounded animate-pulse"></div>
+                  <div className="h-4 bg-gray-100 rounded w-3/4 animate-pulse"></div>
+                </div>
+                <div className="flex justify-between">
+                  <div className="h-4 bg-gray-100 rounded w-24 animate-pulse"></div>
+                  <div className="flex space-x-2">
+                    <div className="h-6 bg-gray-100 rounded w-16 animate-pulse"></div>
+                    <div className="h-6 bg-gray-100 rounded w-20 animate-pulse"></div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+----
+
+==== エラーUI
+
+[source,typescript]
+----
+// src/app/blog/error.tsx
+'use client' // Error componentsはクライアントコンポーネントである必要がある
+
+interface ErrorProps {
+  error: Error & { digest?: string };
+  reset: () => void;
+}
+
+export default function BlogError({ error, reset }: ErrorProps) {
+  return (
+    <div className="text-center py-12">
+      <div className="max-w-md mx-auto">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <div className="text-red-600 mb-4">
+            <svg className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+          </div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-2">
+            エラーが発生しました
+          </h2>
+          <p className="text-gray-600 mb-4">
+            ブログの読み込み中に問題が発生しました。
+          </p>
+          <div className="space-y-3">
+            <button
+              onClick={reset}
+              className="w-full px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+            >
+              再試行
+            </button>
+            <a
+              href="/"
+              className="block w-full px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-center"
+            >
+              ホームに戻る
+            </a>
+          </div>
+          
+          {process.env.NODE_ENV === 'development' && (
+            <details className="mt-4 text-left">
+              <summary className="cursor-pointer text-sm text-gray-500">
+                エラー詳細（開発用）
+              </summary>
+              <pre className="mt-2 text-xs bg-gray-100 p-2 rounded overflow-auto">
+                {error.message}
+              </pre>
+            </details>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+----
+
+== 実践演習
+
+=== 演習5: ブログ一覧ページの作成
+
+ブログ一覧ページを実装してください：
+
+[source,typescript]
+----
+// src/app/blog/page.tsx
+// TODO: 以下の機能を実装してください
+// 1. 記事一覧の表示
+// 2. ページネーション機能
+// 3. 検索機能
+// 4. カテゴリフィルタリング
+// 5. 記事の概要表示
+
+export default function BlogPage() {
+  // 実装してください
+}
+----
+
+=== 演習6: 動的OGP画像生成
+
+記事ページに動的なOGP画像を追加：
+
+[source,typescript]
+----
+// src/app/blog/[slug]/opengraph-image.tsx
+import { ImageResponse } from 'next/og';
+
+export const runtime = 'edge';
+
+export const alt = 'ブログ記事';
+export const size = {
+  width: 1200,
+  height: 630,
+};
+export const contentType = 'image/png';
+
+// TODO: 動的OGP画像生成を実装してください
+// 記事のタイトルや著者情報を含む画像を生成
+----
+
+**学習のポイント:**
+
+1. **ファイルシステムルーティング**: ディレクトリ構造とURLの対応関係を理解
+2. **レイアウトの階層**: ネストしたレイアウトの活用方法
+3. **動的ルーティング**: パラメータを使った柔軟なページ生成
+4. **エラーハンドリング**: 適切なエラー表示とユーザー体験の向上
+5. **読み込み状態**: ローディングUIでのユーザビリティ向上
+
+これらの概念を実際にコードで実装し、Next.jsのルーティングシステムを体感してください。

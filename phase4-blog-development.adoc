@@ -1,0 +1,1420 @@
+= フェーズ4: ブログアプリケーション開発 - 詳細解説
+:toc:
+:toclevels: 4
+:source-highlighter: highlight.js
+
+== 4.1 基本設計
+
+=== ブログの要件定義
+
+本格的なブログアプリケーションを構築するための要件を定義します。
+
+==== 機能要件
+
+**基本機能**
+* 記事の一覧表示
+* 記事の詳細表示
+* カテゴリ別表示
+* タグ別表示
+* 検索機能
+
+**管理機能**
+* 記事の作成・編集・削除
+* カテゴリの管理
+* タグの管理
+* 画像のアップロード
+
+**高度な機能**
+* ユーザー認証
+* コメント機能
+* いいね機能
+* SNSシェア機能
+* RSS配信
+
+==== 非機能要件
+
+* **パフォーマンス**: ページ読み込み時間3秒以内
+* **SEO**: 検索エンジン最適化対応
+* **レスポンシブ**: モバイル・タブレット対応
+* **アクセシビリティ**: WCAG 2.1 AA準拠
+* **セキュリティ**: XSS、CSRF対策
+
+=== データベース設計
+
+初期段階では、JSONファイルやMarkdownファイルを使用し、後にデータベースに移行します。
+
+==== データ構造の定義
+
+[source,typescript]
+----
+// src/types/blog.ts
+
+export interface BlogPost {
+  id: string;
+  title: string;
+  content: string;
+  excerpt: string;
+  slug: string;
+  author: Author;
+  category: Category;
+  tags: Tag[];
+  featuredImage?: string;
+  publishedAt: string;
+  updatedAt: string;
+  status: 'draft' | 'published' | 'archived';
+  seo: SEO;
+  viewCount: number;
+  likeCount: number;
+}
+
+export interface Author {
+  id: string;
+  name: string;
+  email: string;
+  bio?: string;
+  avatar?: string;
+  socialLinks?: {
+    twitter?: string;
+    github?: string;
+    linkedin?: string;
+  };
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  color?: string;
+  postCount: number;
+}
+
+export interface Tag {
+  id: string;
+  name: string;
+  slug: string;
+  postCount: number;
+}
+
+export interface SEO {
+  title?: string;
+  description?: string;
+  keywords?: string[];
+  ogImage?: string;
+}
+
+export interface Comment {
+  id: string;
+  postId: string;
+  author: {
+    name: string;
+    email: string;
+    website?: string;
+  };
+  content: string;
+  createdAt: string;
+  status: 'pending' | 'approved' | 'spam';
+  parentId?: string; // 返信用
+}
+----
+
+==== サンプルデータの作成
+
+[source,typescript]
+----
+// src/data/blog-data.ts
+import { BlogPost, Author, Category, Tag } from '@/types/blog';
+
+export const authors: Author[] = [
+  {
+    id: 'author-1',
+    name: '田中 太郎',
+    email: 'tanaka@example.com',
+    bio: 'フロントエンド開発者として5年の経験を持つ。ReactとNext.jsの専門家。',
+    avatar: '/images/authors/tanaka.jpg',
+    socialLinks: {
+      twitter: 'tanaka_dev',
+      github: 'tanaka-dev',
+    }
+  },
+  {
+    id: 'author-2',
+    name: '佐藤 花子',
+    email: 'sato@example.com',
+    bio: 'UXデザイナー兼フロントエンド開発者。アクセシビリティとパフォーマンスにこだわりを持つ。',
+    avatar: '/images/authors/sato.jpg',
+    socialLinks: {
+      twitter: 'sato_ux',
+      linkedin: 'hanako-sato',
+    }
+  }
+];
+
+export const categories: Category[] = [
+  {
+    id: 'cat-1',
+    name: 'React',
+    slug: 'react',
+    description: 'Reactライブラリに関する記事',
+    color: '#61DAFB',
+    postCount: 15
+  },
+  {
+    id: 'cat-2',
+    name: 'Next.js',
+    slug: 'nextjs',
+    description: 'Next.jsフレームワークに関する記事',
+    color: '#000000',
+    postCount: 12
+  },
+  {
+    id: 'cat-3',
+    name: 'TypeScript',
+    slug: 'typescript',
+    description: 'TypeScriptに関する記事',
+    color: '#3178C6',
+    postCount: 8
+  },
+  {
+    id: 'cat-4',
+    name: 'CSS',
+    slug: 'css',
+    description: 'CSS・スタイリングに関する記事',
+    color: '#1572B6',
+    postCount: 10
+  }
+];
+
+export const tags: Tag[] = [
+  { id: 'tag-1', name: '初心者向け', slug: 'beginner', postCount: 20 },
+  { id: 'tag-2', name: 'チュートリアル', slug: 'tutorial', postCount: 15 },
+  { id: 'tag-3', name: 'ベストプラクティス', slug: 'best-practices', postCount: 12 },
+  { id: 'tag-4', name: 'パフォーマンス', slug: 'performance', postCount: 8 },
+  { id: 'tag-5', name: 'デバッグ', slug: 'debugging', postCount: 6 },
+];
+
+export const blogPosts: BlogPost[] = [
+  {
+    id: 'post-1',
+    title: 'React Hooksの基本と実践的な使い方',
+    content: `
+# React Hooksの基本と実践的な使い方
+
+React Hooksは、React 16.8で導入された機能で、関数コンポーネントで状態管理やライフサイクルメソッドを使用できるようになりました。
+
+## useStateの基本
+
+\`useState\`フックは、関数コンポーネントで状態を管理するための最も基本的なフックです。
+
+\`\`\`typescript
+import { useState } from 'react';
+
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div>
+      <p>現在のカウント: {count}</p>
+      <button onClick={() => setCount(count + 1)}>
+        +1
+      </button>
+    </div>
+  );
+}
+\`\`\`
+
+## useEffectの活用
+
+\`useEffect\`フックは、副作用（データフェッチ、購読、手動でのDOM変更など）を実行するために使用します。
+
+\`\`\`typescript
+import { useState, useEffect } from 'react';
+
+function UserProfile({ userId }: { userId: string }) {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchUser() {
+      try {
+        const response = await fetch(\`/api/users/\${userId}\`);
+        const userData = await response.json();
+        setUser(userData);
+      } catch (error) {
+        console.error('ユーザー情報の取得に失敗しました:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchUser();
+  }, [userId]);
+
+  if (loading) return <div>読み込み中...</div>;
+  if (!user) return <div>ユーザーが見つかりません</div>;
+
+  return (
+    <div>
+      <h1>{user.name}</h1>
+      <p>{user.email}</p>
+    </div>
+  );
+}
+\`\`\`
+
+## カスタムフックの作成
+
+共通のロジックを抽出してカスタムフックを作成することで、コードの再利用性を高めることができます。
+
+\`\`\`typescript
+// カスタムフック: useLocalStorage
+function useLocalStorage<T>(key: string, initialValue: T) {
+  const [storedValue, setStoredValue] = useState<T>(() => {
+    try {
+      const item = window.localStorage.getItem(key);
+      return item ? JSON.parse(item) : initialValue;
+    } catch (error) {
+      return initialValue;
+    }
+  });
+
+  const setValue = (value: T | ((val: T) => T)) => {
+    try {
+      const valueToStore = value instanceof Function ? value(storedValue) : value;
+      setStoredValue(valueToStore);
+      window.localStorage.setItem(key, JSON.stringify(valueToStore));
+    } catch (error) {
+      console.error('LocalStorageへの保存に失敗しました:', error);
+    }
+  };
+
+  return [storedValue, setValue] as const;
+}
+
+// 使用例
+function Settings() {
+  const [theme, setTheme] = useLocalStorage('theme', 'light');
+
+  return (
+    <div>
+      <p>現在のテーマ: {theme}</p>
+      <button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
+        テーマを切り替え
+      </button>
+    </div>
+  );
+}
+\`\`\`
+
+## まとめ
+
+React Hooksを使うことで、関数コンポーネントでも柔軟な状態管理と副作用の処理が可能になります。カスタムフックを活用することで、コードの再利用性と保守性を向上させることができます。
+    `,
+    excerpt: 'React Hooksの基本的な使い方から実践的な活用方法まで、コード例とともに詳しく解説します。',
+    slug: 'react-hooks-basics-and-practical-usage',
+    author: authors[0],
+    category: categories[0],
+    tags: [tags[0], tags[1], tags[2]],
+    featuredImage: '/images/posts/react-hooks.jpg',
+    publishedAt: '2024-01-15T10:00:00Z',
+    updatedAt: '2024-01-15T10:00:00Z',
+    status: 'published',
+    seo: {
+      title: 'React Hooksの基本と実践的な使い方 | React学習ブログ',
+      description: 'React Hooksの基本的な使い方から実践的な活用方法まで、コード例とともに詳しく解説します。useStateやuseEffectの使い方、カスタムフックの作成方法を学びましょう。',
+      keywords: ['React', 'Hooks', 'useState', 'useEffect', 'カスタムフック', 'JavaScript', 'TypeScript'],
+      ogImage: '/images/og/react-hooks.jpg'
+    },
+    viewCount: 1250,
+    likeCount: 89
+  },
+  {
+    id: 'post-2',
+    title: 'Next.js App Routerの完全ガイド',
+    content: `
+# Next.js App Routerの完全ガイド
+
+Next.js 13で導入されたApp Routerは、従来のPages Routerに代わる新しいルーティングシステムです。
+
+## App Routerの基本構造
+
+App Routerでは、\`app\`ディレクトリ内のファイル構造がそのままURLの構造になります。
+
+\`\`\`
+app/
+├── layout.tsx          # ルートレイアウト
+├── page.tsx           # ホームページ (/)
+├── loading.tsx        # ローディングUI
+├── error.tsx          # エラーUI
+├── not-found.tsx      # 404ページ
+├── blog/
+│   ├── layout.tsx     # ブログセクションのレイアウト
+│   ├── page.tsx       # ブログ一覧 (/blog)
+│   └── [slug]/
+│       └── page.tsx   # 個別記事 (/blog/[slug])
+└── api/
+    └── posts/
+        └── route.ts   # API Route
+\`\`\`
+
+## Server ComponentsとClient Components
+
+App Routerでは、デフォルトでServer Componentsが使用されます。
+
+### Server Component（デフォルト）
+
+\`\`\`typescript
+// app/blog/page.tsx
+async function getBlogPosts() {
+  const res = await fetch('https://api.example.com/posts', {
+    next: { revalidate: 3600 } // 1時間キャッシュ
+  });
+  return res.json();
+}
+
+export default async function BlogPage() {
+  const posts = await getBlogPosts();
+
+  return (
+    <div>
+      <h1>ブログ記事</h1>
+      {posts.map(post => (
+        <article key={post.id}>
+          <h2>{post.title}</h2>
+          <p>{post.excerpt}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+\`\`\`
+
+### Client Component（'use client'が必要）
+
+\`\`\`typescript
+'use client'
+
+import { useState } from 'react';
+
+export default function SearchBox() {
+  const [query, setQuery] = useState('');
+
+  return (
+    <div>
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="記事を検索..."
+      />
+    </div>
+  );
+}
+\`\`\`
+
+## データフェッチングのパターン
+
+### 並列データフェッチング
+
+\`\`\`typescript
+// app/dashboard/page.tsx
+async function getUser() {
+  const res = await fetch('https://api.example.com/user');
+  return res.json();
+}
+
+async function getPosts() {
+  const res = await fetch('https://api.example.com/posts');
+  return res.json();
+}
+
+export default async function Dashboard() {
+  // 並列でデータを取得
+  const [user, posts] = await Promise.all([
+    getUser(),
+    getPosts()
+  ]);
+
+  return (
+    <div>
+      <h1>こんにちは、{user.name}さん</h1>
+      <div>
+        {posts.map(post => (
+          <div key={post.id}>{post.title}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+\`\`\`
+
+### 順次データフェッチング
+
+\`\`\`typescript
+// app/profile/[id]/page.tsx
+async function getUser(id: string) {
+  const res = await fetch(\`https://api.example.com/users/\${id}\`);
+  return res.json();
+}
+
+async function getUserPosts(userId: string) {
+  const res = await fetch(\`https://api.example.com/users/\${userId}/posts\`);
+  return res.json();
+}
+
+export default async function ProfilePage({ params }: { params: { id: string } }) {
+  const user = await getUser(params.id);
+  // ユーザー情報を取得してから投稿を取得
+  const posts = await getUserPosts(user.id);
+
+  return (
+    <div>
+      <h1>{user.name}のプロフィール</h1>
+      <div>
+        {posts.map(post => (
+          <div key={post.id}>{post.title}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+\`\`\`
+
+## レイアウトとテンプレート
+
+### 共通レイアウト
+
+\`\`\`typescript
+// app/layout.tsx
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="ja">
+      <body>
+        <header>
+          <nav>
+            <a href="/">ホーム</a>
+            <a href="/blog">ブログ</a>
+            <a href="/about">About</a>
+          </nav>
+        </header>
+        <main>{children}</main>
+        <footer>
+          <p>&copy; 2024 My Blog</p>
+        </footer>
+      </body>
+    </html>
+  );
+}
+\`\`\`
+
+### セクション別レイアウト
+
+\`\`\`typescript
+// app/blog/layout.tsx
+export default function BlogLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="blog-layout">
+      <aside>
+        <h2>カテゴリ</h2>
+        <ul>
+          <li><a href="/blog/react">React</a></li>
+          <li><a href="/blog/nextjs">Next.js</a></li>
+        </ul>
+      </aside>
+      <div className="blog-content">
+        {children}
+      </div>
+    </div>
+  );
+}
+\`\`\`
+
+## まとめ
+
+App Routerは、Next.jsの新しいルーティングシステムで、Server ComponentsとClient Componentsを適切に使い分けることで、パフォーマンスとユーザー体験の両方を向上させることができます。
+    `,
+    excerpt: 'Next.js 13で導入されたApp Routerの使い方を、基本構造からデータフェッチング、レイアウトまで詳しく解説します。',
+    slug: 'nextjs-app-router-complete-guide',
+    author: authors[1],
+    category: categories[1],
+    tags: [tags[1], tags[2]],
+    featuredImage: '/images/posts/nextjs-app-router.jpg',
+    publishedAt: '2024-01-20T14:00:00Z',
+    updatedAt: '2024-01-20T14:00:00Z',
+    status: 'published',
+    seo: {
+      title: 'Next.js App Routerの完全ガイド | React学習ブログ',
+      description: 'Next.js 13で導入されたApp Routerの使い方を、基本構造からデータフェッチング、レイアウトまで詳しく解説します。',
+      keywords: ['Next.js', 'App Router', 'Server Components', 'データフェッチング', 'レイアウト'],
+      ogImage: '/images/og/nextjs-app-router.jpg'
+    },
+    viewCount: 980,
+    likeCount: 67
+  }
+];
+----
+
+=== UI/UXの設計
+
+ブログアプリケーションの使いやすいインターフェースを設計します。
+
+==== デザインシステムの構築
+
+[source,typescript]
+----
+// src/components/ui/Button.tsx
+import { ButtonHTMLAttributes, ReactNode } from 'react';
+import { cva, type VariantProps } from 'class-variance-authority';
+
+const buttonVariants = cva(
+  'inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none',
+  {
+    variants: {
+      variant: {
+        default: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
+        secondary: 'bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500',
+        outline: 'border border-gray-300 bg-transparent text-gray-700 hover:bg-gray-50 focus:ring-gray-500',
+        ghost: 'text-gray-700 hover:bg-gray-100 focus:ring-gray-500',
+        destructive: 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500',
+      },
+      size: {
+        sm: 'h-8 px-3 text-xs',
+        default: 'h-10 px-4',
+        lg: 'h-12 px-6 text-base',
+      },
+    },
+    defaultVariants: {
+      variant: 'default',
+      size: 'default',
+    },
+  }
+);
+
+interface ButtonProps
+  extends ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  children: ReactNode;
+}
+
+export default function Button({
+  children,
+  variant,
+  size,
+  className,
+  ...props
+}: ButtonProps) {
+  return (
+    <button
+      className={buttonVariants({ variant, size, className })}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+----
+
+[source,typescript]
+----
+// src/components/ui/Card.tsx
+import { ReactNode } from 'react';
+
+interface CardProps {
+  children: ReactNode;
+  className?: string;
+}
+
+export function Card({ children, className = '' }: CardProps) {
+  return (
+    <div className={`bg-white border border-gray-200 rounded-lg shadow-sm ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+export function CardHeader({ children, className = '' }: CardProps) {
+  return (
+    <div className={`px-6 py-4 border-b border-gray-200 ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+export function CardContent({ children, className = '' }: CardProps) {
+  return (
+    <div className={`px-6 py-4 ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+export function CardFooter({ children, className = '' }: CardProps) {
+  return (
+    <div className={`px-6 py-4 border-t border-gray-200 ${className}`}>
+      {children}
+    </div>
+  );
+}
+----
+
+==== レスポンシブレイアウト
+
+[source,typescript]
+----
+// src/components/layout/BlogLayout.tsx
+import { ReactNode } from 'react';
+import Header from './Header';
+import Footer from './Footer';
+import Sidebar from './Sidebar';
+
+interface BlogLayoutProps {
+  children: ReactNode;
+  showSidebar?: boolean;
+}
+
+export default function BlogLayout({ children, showSidebar = true }: BlogLayoutProps) {
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className={`grid gap-8 ${showSidebar ? 'lg:grid-cols-4' : 'lg:grid-cols-1'}`}>
+          <main className={showSidebar ? 'lg:col-span-3' : 'lg:col-span-1'}>
+            {children}
+          </main>
+          
+          {showSidebar && (
+            <aside className="lg:col-span-1">
+              <div className="sticky top-8">
+                <Sidebar />
+              </div>
+            </aside>
+          )}
+        </div>
+      </div>
+      
+      <Footer />
+    </div>
+  );
+}
+----
+
+[source,typescript]
+----
+// src/components/layout/Header.tsx
+'use client'
+
+import { useState } from 'react';
+import Link from 'next/link';
+import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
+
+export default function Header() {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const navigation = [
+    { name: 'ホーム', href: '/' },
+    { name: 'ブログ', href: '/blog' },
+    { name: 'カテゴリ', href: '/categories' },
+    { name: 'タグ', href: '/tags' },
+    { name: 'About', href: '/about' },
+  ];
+
+  return (
+    <header className="bg-white shadow-sm border-b border-gray-200">
+      <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8" aria-label="Top">
+        <div className="flex justify-between items-center py-4">
+          {/* ロゴ */}
+          <div className="flex items-center">
+            <Link href="/" className="text-2xl font-bold text-blue-600">
+              React学習ブログ
+            </Link>
+          </div>
+
+          {/* デスクトップナビゲーション */}
+          <div className="hidden md:flex items-center space-x-8">
+            {navigation.map((item) => (
+              <Link
+                key={item.name}
+                href={item.href}
+                className="text-gray-700 hover:text-blue-600 font-medium transition-colors"
+              >
+                {item.name}
+              </Link>
+            ))}
+          </div>
+
+          {/* モバイルメニューボタン */}
+          <div className="md:hidden">
+            <button
+              type="button"
+              className="text-gray-700 hover:text-blue-600"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            >
+              {mobileMenuOpen ? (
+                <XMarkIcon className="h-6 w-6" aria-hidden="true" />
+              ) : (
+                <Bars3Icon className="h-6 w-6" aria-hidden="true" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* モバイルメニュー */}
+        {mobileMenuOpen && (
+          <div className="md:hidden border-t border-gray-200 py-4">
+            <div className="flex flex-col space-y-4">
+              {navigation.map((item) => (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className="text-gray-700 hover:text-blue-600 font-medium transition-colors"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  {item.name}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+      </nav>
+    </header>
+  );
+}
+----
+
+== 4.2 実装
+
+=== 記事一覧ページの作成
+
+[source,typescript]
+----
+// src/app/blog/page.tsx
+import { Suspense } from 'react';
+import { Metadata } from 'next';
+import BlogList from '@/components/blog/BlogList';
+import BlogSearch from '@/components/blog/BlogSearch';
+import CategoryFilter from '@/components/blog/CategoryFilter';
+import TagCloud from '@/components/blog/TagCloud';
+import { blogPosts, categories, tags } from '@/data/blog-data';
+import BlogLayout from '@/components/layout/BlogLayout';
+
+export const metadata: Metadata = {
+  title: 'ブログ記事一覧 | React学習ブログ',
+  description: 'React、Next.js、TypeScriptに関する技術ブログ記事の一覧です。',
+};
+
+interface BlogPageProps {
+  searchParams: {
+    category?: string;
+    tag?: string;
+    search?: string;
+    page?: string;
+  };
+}
+
+export default function BlogPage({ searchParams }: BlogPageProps) {
+  const { category, tag, search, page = '1' } = searchParams;
+  const currentPage = parseInt(page, 10);
+  const postsPerPage = 6;
+
+  // フィルタリング
+  let filteredPosts = blogPosts.filter(post => post.status === 'published');
+
+  if (category) {
+    filteredPosts = filteredPosts.filter(post => post.category.slug === category);
+  }
+
+  if (tag) {
+    filteredPosts = filteredPosts.filter(post => 
+      post.tags.some(postTag => postTag.slug === tag)
+    );
+  }
+
+  if (search) {
+    const searchLower = search.toLowerCase();
+    filteredPosts = filteredPosts.filter(post =>
+      post.title.toLowerCase().includes(searchLower) ||
+      post.content.toLowerCase().includes(searchLower) ||
+      post.excerpt.toLowerCase().includes(searchLower)
+    );
+  }
+
+  // ページネーション
+  const totalPages = Math.ceil(filteredPosts.length / postsPerPage);
+  const startIndex = (currentPage - 1) * postsPerPage;
+  const paginatedPosts = filteredPosts.slice(startIndex, startIndex + postsPerPage);
+
+  return (
+    <BlogLayout>
+      <div className="space-y-8">
+        {/* ヘッダーセクション */}
+        <div className="text-center">
+          <h1 className="text-4xl font-bold text-gray-900 mb-4">
+            ブログ記事
+          </h1>
+          <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+            React、Next.js、TypeScriptの学習に役立つ記事をお届けします
+          </p>
+        </div>
+
+        {/* 検索・フィルター */}
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <div className="grid md:grid-cols-2 gap-6">
+            <Suspense fallback={<div>検索機能を読み込み中...</div>}>
+              <BlogSearch initialValue={search} />
+            </Suspense>
+            <CategoryFilter
+              categories={categories}
+              selectedCategory={category}
+            />
+          </div>
+        </div>
+
+        {/* 記事一覧 */}
+        <Suspense fallback={<BlogListSkeleton />}>
+          <BlogList
+            posts={paginatedPosts}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalPosts={filteredPosts.length}
+          />
+        </Suspense>
+
+        {/* タグクラウド */}
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">
+            人気のタグ
+          </h2>
+          <TagCloud tags={tags} selectedTag={tag} />
+        </div>
+      </div>
+    </BlogLayout>
+  );
+}
+
+// ローディングスケルトン
+function BlogListSkeleton() {
+  return (
+    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {[...Array(6)].map((_, i) => (
+        <div key={i} className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <div className="animate-pulse">
+            <div className="h-48 bg-gray-200 rounded mb-4"></div>
+            <div className="h-6 bg-gray-200 rounded mb-2"></div>
+            <div className="h-4 bg-gray-200 rounded mb-4"></div>
+            <div className="flex justify-between">
+              <div className="h-4 bg-gray-200 rounded w-20"></div>
+              <div className="h-4 bg-gray-200 rounded w-16"></div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+----
+
+[source,typescript]
+----
+// src/components/blog/BlogList.tsx
+import Link from 'next/link';
+import Image from 'next/image';
+import { BlogPost } from '@/types/blog';
+import { Card, CardContent, CardFooter } from '@/components/ui/Card';
+import Button from '@/components/ui/Button';
+import Pagination from '@/components/ui/Pagination';
+
+interface BlogListProps {
+  posts: BlogPost[];
+  currentPage: number;
+  totalPages: number;
+  totalPosts: number;
+}
+
+export default function BlogList({ posts, currentPage, totalPages, totalPosts }: BlogListProps) {
+  if (posts.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <div className="text-gray-400 mb-4">
+          <svg className="mx-auto h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </div>
+        <h3 className="text-lg font-medium text-gray-900 mb-2">記事が見つかりませんでした</h3>
+        <p className="text-gray-600 mb-6">検索条件を変更してもう一度お試しください。</p>
+        <Button variant="outline" onClick={() => window.location.href = '/blog'}>
+          すべての記事を表示
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* 結果サマリー */}
+      <div className="flex justify-between items-center">
+        <p className="text-gray-600">
+          {totalPosts}件の記事が見つかりました
+        </p>
+        <p className="text-sm text-gray-500">
+          {currentPage} / {totalPages} ページ
+        </p>
+      </div>
+
+      {/* 記事グリッド */}
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {posts.map((post) => (
+          <Card key={post.id} className="hover:shadow-lg transition-shadow duration-200">
+            <div className="aspect-video relative overflow-hidden rounded-t-lg">
+              {post.featuredImage ? (
+                <Image
+                  src={post.featuredImage}
+                  alt={post.title}
+                  fill
+                  className="object-cover"
+                />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center">
+                  <span className="text-white text-2xl font-bold">
+                    {post.title.charAt(0)}
+                  </span>
+                </div>
+              )}
+            </div>
+            
+            <CardContent className="p-6">
+              <div className="flex items-center space-x-2 mb-3">
+                <span
+                  className="px-2 py-1 text-xs font-medium rounded"
+                  style={{
+                    backgroundColor: `${post.category.color}20`,
+                    color: post.category.color,
+                  }}
+                >
+                  {post.category.name}
+                </span>
+                <span className="text-xs text-gray-500">
+                  {new Date(post.publishedAt).toLocaleDateString('ja-JP')}
+                </span>
+              </div>
+              
+              <h2 className="text-xl font-semibold text-gray-900 mb-3 line-clamp-2">
+                <Link 
+                  href={`/blog/${post.slug}`}
+                  className="hover:text-blue-600 transition-colors"
+                >
+                  {post.title}
+                </Link>
+              </h2>
+              
+              <p className="text-gray-600 text-sm mb-4 line-clamp-3">
+                {post.excerpt}
+              </p>
+              
+              <div className="flex flex-wrap gap-2 mb-4">
+                {post.tags.slice(0, 3).map((tag) => (
+                  <Link
+                    key={tag.id}
+                    href={`/blog?tag=${tag.slug}`}
+                    className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors"
+                  >
+                    #{tag.name}
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+            
+            <CardFooter className="px-6 pb-6">
+              <div className="flex justify-between items-center w-full">
+                <div className="flex items-center space-x-4 text-sm text-gray-500">
+                  <span className="flex items-center">
+                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    {post.viewCount}
+                  </span>
+                  <span className="flex items-center">
+                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                    </svg>
+                    {post.likeCount}
+                  </span>
+                </div>
+                <Link href={`/blog/${post.slug}`}>
+                  <Button variant="outline" size="sm">
+                    続きを読む
+                  </Button>
+                </Link>
+              </div>
+            </CardFooter>
+          </Card>
+        ))}
+      </div>
+
+      {/* ページネーション */}
+      {totalPages > 1 && (
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          baseUrl="/blog"
+        />
+      )}
+    </div>
+  );
+}
+----
+
+=== 記事詳細ページの作成
+
+[source,typescript]
+----
+// src/app/blog/[slug]/page.tsx
+import { Metadata } from 'next';
+import { notFound } from 'next/navigation';
+import Image from 'next/image';
+import Link from 'next/link';
+import { blogPosts } from '@/data/blog-data';
+import BlogLayout from '@/components/layout/BlogLayout';
+import ShareButtons from '@/components/blog/ShareButtons';
+import RelatedPosts from '@/components/blog/RelatedPosts';
+import CommentSection from '@/components/blog/CommentSection';
+import TableOfContents from '@/components/blog/TableOfContents';
+import LikeButton from '@/components/blog/LikeButton';
+import MarkdownRenderer from '@/components/blog/MarkdownRenderer';
+
+interface BlogPostPageProps {
+  params: {
+    slug: string;
+  };
+}
+
+function getPostBySlug(slug: string) {
+  return blogPosts.find(post => post.slug === slug && post.status === 'published');
+}
+
+function getRelatedPosts(currentPost: any, limit = 3) {
+  return blogPosts
+    .filter(post => 
+      post.id !== currentPost.id &&
+      post.status === 'published' &&
+      (post.category.id === currentPost.category.id ||
+       post.tags.some(tag => currentPost.tags.some(currentTag => currentTag.id === tag.id)))
+    )
+    .slice(0, limit);
+}
+
+export async function generateMetadata({ params }: BlogPostPageProps): Promise<Metadata> {
+  const post = getPostBySlug(params.slug);
+  
+  if (!post) {
+    return {
+      title: '記事が見つかりません',
+    };
+  }
+
+  return {
+    title: post.seo.title || post.title,
+    description: post.seo.description || post.excerpt,
+    keywords: post.seo.keywords,
+    openGraph: {
+      title: post.title,
+      description: post.excerpt,
+      images: post.seo.ogImage ? [post.seo.ogImage] : undefined,
+      type: 'article',
+      publishedTime: post.publishedAt,
+      modifiedTime: post.updatedAt,
+      authors: [post.author.name],
+      tags: post.tags.map(tag => tag.name),
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: post.title,
+      description: post.excerpt,
+      images: post.seo.ogImage ? [post.seo.ogImage] : undefined,
+    },
+  };
+}
+
+export default function BlogPostPage({ params }: BlogPostPageProps) {
+  const post = getPostBySlug(params.slug);
+  
+  if (!post) {
+    notFound();
+  }
+
+  const relatedPosts = getRelatedPosts(post);
+  const currentUrl = `${process.env.NEXT_PUBLIC_SITE_URL}/blog/${post.slug}`;
+
+  return (
+    <BlogLayout showSidebar={false}>
+      <article className="max-w-4xl mx-auto">
+        {/* 記事ヘッダー */}
+        <header className="mb-8">
+          {post.featuredImage && (
+            <div className="aspect-video relative overflow-hidden rounded-lg mb-8">
+              <Image
+                src={post.featuredImage}
+                alt={post.title}
+                fill
+                className="object-cover"
+                priority
+              />
+            </div>
+          )}
+          
+          <div className="mb-6">
+            {/* パンくずナビ */}
+            <nav className="text-sm text-gray-500 mb-4">
+              <Link href="/" className="hover:text-blue-600">ホーム</Link>
+              <span className="mx-2">/</span>
+              <Link href="/blog" className="hover:text-blue-600">ブログ</Link>
+              <span className="mx-2">/</span>
+              <Link 
+                href={`/blog?category=${post.category.slug}`}
+                className="hover:text-blue-600"
+              >
+                {post.category.name}
+              </Link>
+              <span className="mx-2">/</span>
+              <span className="text-gray-700">{post.title}</span>
+            </nav>
+            
+            {/* カテゴリバッジ */}
+            <Link
+              href={`/blog?category=${post.category.slug}`}
+              className="inline-block px-3 py-1 text-sm font-medium rounded-full mb-4"
+              style={{
+                backgroundColor: `${post.category.color}20`,
+                color: post.category.color,
+              }}
+            >
+              {post.category.name}
+            </Link>
+          </div>
+          
+          <h1 className="text-4xl md:text-5xl font-bold text-gray-900 leading-tight mb-6">
+            {post.title}
+          </h1>
+          
+          <p className="text-xl text-gray-600 mb-8">
+            {post.excerpt}
+          </p>
+          
+          {/* 著者情報・メタデータ */}
+          <div className="flex flex-wrap items-center justify-between gap-4 pb-8 border-b border-gray-200">
+            <div className="flex items-center space-x-4">
+              {post.author.avatar && (
+                <Image
+                  src={post.author.avatar}
+                  alt={post.author.name}
+                  width={48}
+                  height={48}
+                  className="rounded-full"
+                />
+              )}
+              <div>
+                <p className="font-semibold text-gray-900">{post.author.name}</p>
+                <div className="flex items-center space-x-4 text-sm text-gray-500">
+                  <time dateTime={post.publishedAt}>
+                    {new Date(post.publishedAt).toLocaleDateString('ja-JP', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    })}
+                  </time>
+                  {post.updatedAt !== post.publishedAt && (
+                    <span>
+                      (更新: {new Date(post.updatedAt).toLocaleDateString('ja-JP')})
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex items-center space-x-6 text-sm text-gray-500">
+              <span className="flex items-center">
+                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+                {post.viewCount.toLocaleString()}回表示
+              </span>
+              <LikeButton postId={post.id} initialLikes={post.likeCount} />
+            </div>
+          </div>
+        </header>
+
+        {/* 記事コンテンツ */}
+        <div className="grid lg:grid-cols-4 gap-8">
+          <div className="lg:col-span-3">
+            <div className="prose prose-lg max-w-none">
+              <MarkdownRenderer content={post.content} />
+            </div>
+            
+            {/* タグ */}
+            <div className="mt-12 pt-8 border-t border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">タグ</h3>
+              <div className="flex flex-wrap gap-2">
+                {post.tags.map((tag) => (
+                  <Link
+                    key={tag.id}
+                    href={`/blog?tag=${tag.slug}`}
+                    className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm hover:bg-gray-200 transition-colors"
+                  >
+                    #{tag.name}
+                  </Link>
+                ))}
+              </div>
+            </div>
+            
+            {/* シェアボタン */}
+            <ShareButtons
+              url={currentUrl}
+              title={post.title}
+              description={post.excerpt}
+            />
+            
+            {/* 著者プロフィール */}
+            <div className="mt-12 p-6 bg-gray-50 rounded-lg">
+              <div className="flex items-start space-x-4">
+                {post.author.avatar && (
+                  <Image
+                    src={post.author.avatar}
+                    alt={post.author.name}
+                    width={64}
+                    height={64}
+                    className="rounded-full"
+                  />
+                )}
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                    {post.author.name}
+                  </h3>
+                  {post.author.bio && (
+                    <p className="text-gray-600 mb-3">{post.author.bio}</p>
+                  )}
+                  {post.author.socialLinks && (
+                    <div className="flex space-x-4">
+                      {post.author.socialLinks.twitter && (
+                        <a
+                          href={`https://twitter.com/${post.author.socialLinks.twitter}`}
+                          className="text-blue-400 hover:text-blue-600"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Twitter
+                        </a>
+                      )}
+                      {post.author.socialLinks.github && (
+                        <a
+                          href={`https://github.com/${post.author.socialLinks.github}`}
+                          className="text-gray-700 hover:text-gray-900"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          GitHub
+                        </a>
+                      )}
+                      {post.author.socialLinks.linkedin && (
+                        <a
+                          href={`https://linkedin.com/in/${post.author.socialLinks.linkedin}`}
+                          className="text-blue-600 hover:text-blue-800"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          LinkedIn
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* サイドバー（目次） */}
+          <div className="lg:col-span-1">
+            <div className="sticky top-8">
+              <TableOfContents content={post.content} />
+            </div>
+          </div>
+        </div>
+
+        {/* 関連記事 */}
+        {relatedPosts.length > 0 && (
+          <RelatedPosts posts={relatedPosts} />
+        )}
+
+        {/* コメントセクション */}
+        <CommentSection postId={post.id} />
+      </article>
+    </BlogLayout>
+  );
+}
+
+// 静的パスの生成
+export function generateStaticParams() {
+  return blogPosts
+    .filter(post => post.status === 'published')
+    .map(post => ({
+      slug: post.slug,
+    }));
+}
+----
+
+== 実践演習
+
+=== 演習9: 完全なブログシステム
+
+以下の機能を含む完全なブログシステムを実装してください：
+
+1. **記事管理システム**
+   - 記事の作成・編集・削除
+   - 下書き機能
+   - 公開・非公開切り替え
+
+2. **検索・フィルタリング機能**
+   - 全文検索
+   - カテゴリフィルター
+   - タグフィルター
+   - 日付範囲検索
+
+3. **SEO対応**
+   - 動的メタデータ生成
+   - sitemap.xml生成
+   - RSS配信
+
+4. **パフォーマンス最適化**
+   - 画像最適化
+   - 静的サイト生成（SSG）
+   - キャッシング戦略
+
+### 実装チェックリスト
+
+- [ ] 記事一覧ページの実装
+- [ ] 記事詳細ページの実装
+- [ ] カテゴリページの実装
+- [ ] タグページの実装
+- [ ] 検索機能の実装
+- [ ] レスポンシブデザインの実装
+- [ ] SEO対策の実装
+- [ ] パフォーマンス最適化
+
+**学習のポイント:**
+
+1. **コンポーネント設計**: 再利用可能なコンポーネントの作成
+2. **データ管理**: 効率的なデータ構造の設計
+3. **UI/UX**: ユーザビリティを考慮したインターフェース
+4. **パフォーマンス**: 最適化手法の適用
+5. **SEO**: 検索エンジン対応の実装
+
+これらの実装を通じて、実際のWebアプリケーション開発に必要なスキルを習得してください。
