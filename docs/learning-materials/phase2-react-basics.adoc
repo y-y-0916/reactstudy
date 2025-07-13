@@ -276,6 +276,198 @@ export default function StatusBadge({ status }: StatusBadgeProps) {
 }
 ----
 
+=== スタイリングとclassName
+
+ReactでのCSSクラス指定とTailwind CSSの使用方法を学習します。
+
+==== classNameプロパティの理解
+
+ReactでHTMLの`class`属性に相当するものが`className`プロパティです。JavaScriptの予約語である`class`と区別するために使用されます。
+
+[source,typescript]
+----
+// 通常のHTML
+<div class="container"></div>
+
+// React JSX
+<div className="container"></div>
+----
+
+==== Tailwind CSSの基本
+
+このプロジェクトではTailwind CSSを使用しています。Tailwind CSSはユーティリティファーストのCSSフレームワークです。
+
+[source,typescript]
+----
+// src/components/StyledCard.tsx
+interface StyledCardProps {
+  title: string;
+  content: string;
+  variant?: 'default' | 'success' | 'warning' | 'error';
+}
+
+export default function StyledCard({ title, content, variant = 'default' }: StyledCardProps) {
+  // variant に応じてクラスを動的に変更
+  const getVariantClasses = () => {
+    switch (variant) {
+      case 'success':
+        return 'bg-green-50 border-green-200 text-green-800';
+      case 'warning':
+        return 'bg-yellow-50 border-yellow-200 text-yellow-800';
+      case 'error':
+        return 'bg-red-50 border-red-200 text-red-800';
+      default:
+        return 'bg-gray-50 border-gray-200 text-gray-800';
+    }
+  };
+
+  return (
+    <div className={`border rounded-lg p-6 ${getVariantClasses()}`}>
+      <h3 className="text-lg font-semibold mb-2">{title}</h3>
+      <p className="text-sm">{content}</p>
+    </div>
+  );
+}
+----
+
+==== よく使用されるTailwind CSSクラス
+
+**レイアウト:**
+* `container` - コンテナ幅の制限
+* `mx-auto` - 水平方向の中央寄せ
+* `flex`, `grid` - フレックスボックス、グリッドレイアウト
+* `space-y-4` - 子要素間の垂直スペース
+
+**サイズ:**
+* `w-full`, `h-full` - 幅・高さ100%
+* `max-w-md`, `max-w-lg` - 最大幅の制限
+* `p-4`, `px-6`, `py-2` - パディング
+* `m-4`, `mx-auto`, `my-8` - マージン
+
+**色とスタイル:**
+* `bg-blue-100` - 背景色（薄い青）
+* `text-gray-600` - テキスト色（グレー）
+* `border`, `border-gray-300` - ボーダー
+* `rounded`, `rounded-lg` - 角丸
+
+**テキスト:**
+* `text-sm`, `text-lg`, `text-xl` - フォントサイズ
+* `font-bold`, `font-semibold` - フォントウェイト
+* `text-center`, `text-left` - テキスト配置
+
+[source,typescript]
+----
+// src/components/LoginStatus.tsx（改良版）
+interface LoginStatusProps {
+  isLoggedIn: boolean;
+  username?: string;
+}
+
+export default function LoginStatus({ isLoggedIn, username }: LoginStatusProps) {
+  return (
+    <div className={`p-4 rounded-lg border ${
+      isLoggedIn 
+        ? 'bg-green-50 border-green-200 text-green-800' 
+        : 'bg-blue-50 border-blue-200 text-blue-800'
+    }`}>
+      {isLoggedIn ? (
+        <p className="font-medium">ようこそ、{username}さん！</p>
+      ) : (
+        <p className="font-medium">ログインしてください。</p>
+      )}
+    </div>
+  );
+}
+----
+
+==== 条件付きスタイリング
+
+状態に応じてスタイルを動的に変更する方法：
+
+[source,typescript]
+----
+// src/components/Button.tsx
+interface ButtonProps {
+  children: React.ReactNode;
+  variant?: 'primary' | 'secondary' | 'danger';
+  size?: 'sm' | 'md' | 'lg';
+  disabled?: boolean;
+  onClick?: () => void;
+}
+
+export default function Button({ 
+  children, 
+  variant = 'primary', 
+  size = 'md', 
+  disabled = false,
+  onClick 
+}: ButtonProps) {
+  const baseClasses = 'font-medium rounded focus:outline-none focus:ring-2 transition-colors';
+  
+  const variantClasses = {
+    primary: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
+    secondary: 'bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500',
+    danger: 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500',
+  };
+  
+  const sizeClasses = {
+    sm: 'px-3 py-1.5 text-sm',
+    md: 'px-4 py-2 text-base',
+    lg: 'px-6 py-3 text-lg',
+  };
+  
+  const disabledClasses = disabled 
+    ? 'opacity-50 cursor-not-allowed' 
+    : 'cursor-pointer';
+
+  const className = `${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]} ${disabledClasses}`;
+
+  return (
+    <button 
+      className={className}
+      onClick={!disabled ? onClick : undefined}
+      disabled={disabled}
+    >
+      {children}
+    </button>
+  );
+}
+----
+
+==== レスポンシブデザイン
+
+Tailwind CSSのブレークポイントプレフィックスを使用：
+
+[source,typescript]
+----
+// src/components/ResponsiveGrid.tsx
+interface ResponsiveGridProps {
+  items: string[];
+}
+
+export default function ResponsiveGrid({ items }: ResponsiveGridProps) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+      {items.map((item, index) => (
+        <div 
+          key={index} 
+          className="bg-white p-4 rounded-lg shadow hover:shadow-lg transition-shadow"
+        >
+          <p className="text-center">{item}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+----
+
+**ブレークポイント:**
+* デフォルト: モバイル（768px未満）
+* `sm:` - 768px以上
+* `md:` - 1024px以上
+* `lg:` - 1280px以上
+* `xl:` - 1536px以上
+
 === リストの表示
 
 配列データをUIに表示する方法です。

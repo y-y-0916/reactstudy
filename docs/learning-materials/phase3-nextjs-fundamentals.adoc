@@ -517,6 +517,384 @@ export default function BlogError({ error, reset }: ErrorProps) {
 }
 ----
 
+=== 3.3 スタイリングとTailwind CSS
+
+Next.jsプロジェクトでのスタイリング手法とTailwind CSSの実践的な使用方法を学習します。
+
+==== グローバルスタイルの設定
+
+[source,css]
+----
+/* src/app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* カスタムスタイル */
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500;
+  }
+  
+  .card {
+    @apply bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+----
+
+==== Next.jsでのフォント最適化
+
+[source,typescript]
+----
+// src/app/layout.tsx
+import { Inter, Noto_Sans_JP } from 'next/font/google'
+
+// 英字フォント
+const inter = Inter({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-inter',
+})
+
+// 日本語フォント
+const notoSansJP = Noto_Sans_JP({
+  subsets: ['latin'],
+  display: 'swap',
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-noto-sans-jp',
+})
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html lang="ja" className={`${inter.variable} ${notoSansJP.variable}`}>
+      <body className="font-sans antialiased">
+        {children}
+      </body>
+    </html>
+  )
+}
+----
+
+==== Tailwind CSS設定のカスタマイズ
+
+[source,javascript]
+----
+// tailwind.config.js
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/components/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/app/**/*.{js,ts,jsx,tsx,mdx}',
+  ],
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ['var(--font-inter)', 'var(--font-noto-sans-jp)', 'system-ui', 'sans-serif'],
+      },
+      colors: {
+        primary: {
+          50: '#eff6ff',
+          100: '#dbeafe',
+          500: '#3b82f6',
+          600: '#2563eb',
+          700: '#1d4ed8',
+          900: '#1e3a8a',
+        },
+        gray: {
+          50: '#f9fafb',
+          100: '#f3f4f6',
+          200: '#e5e7eb',
+          300: '#d1d5db',
+          400: '#9ca3af',
+          500: '#6b7280',
+          600: '#4b5563',
+          700: '#374151',
+          800: '#1f2937',
+          900: '#111827',
+        }
+      },
+      spacing: {
+        '18': '4.5rem',
+        '88': '22rem',
+      },
+      animation: {
+        'fade-in': 'fadeIn 0.5s ease-in-out',
+        'slide-up': 'slideUp 0.3s ease-out',
+      },
+      keyframes: {
+        fadeIn: {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        slideUp: {
+          '0%': { transform: 'translateY(10px)', opacity: '0' },
+          '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+      },
+    },
+  },
+  plugins: [
+    require('@tailwindcss/typography'),
+    require('@tailwindcss/forms'),
+  ],
+}
+----
+
+==== CSS Modulesとの併用
+
+[source,typescript]
+----
+// src/components/SpecialCard.module.css
+.card {
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s;
+}
+
+.card:hover::before {
+  left: 100%;
+}
+
+.shimmer {
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -468px 0; }
+  100% { background-position: 468px 0; }
+}
+----
+
+[source,typescript]
+----
+// src/components/SpecialCard.tsx
+import styles from './SpecialCard.module.css'
+
+interface SpecialCardProps {
+  title: string;
+  description: string;
+  isLoading?: boolean;
+}
+
+export default function SpecialCard({ title, description, isLoading }: SpecialCardProps) {
+  return (
+    <div className={`${styles.card} p-6 bg-white border rounded-lg ${isLoading ? styles.shimmer : ''}`}>
+      <h3 className="text-lg font-semibold mb-2">{title}</h3>
+      <p className="text-gray-600">{description}</p>
+    </div>
+  );
+}
+----
+
+==== ダークモードの実装
+
+[source,typescript]
+----
+// src/components/ThemeProvider.tsx
+'use client'
+
+import { createContext, useContext, useEffect, useState } from 'react'
+
+type Theme = 'light' | 'dark' | 'system'
+
+interface ThemeContextType {
+  theme: Theme
+  setTheme: (theme: Theme) => void
+}
+
+const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const [theme, setTheme] = useState<Theme>('system')
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    const savedTheme = localStorage.getItem('theme') as Theme
+    if (savedTheme) {
+      setTheme(savedTheme)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!mounted) return
+
+    const root = window.document.documentElement
+    root.classList.remove('light', 'dark')
+
+    if (theme === 'system') {
+      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light'
+      root.classList.add(systemTheme)
+    } else {
+      root.classList.add(theme)
+    }
+
+    localStorage.setItem('theme', theme)
+  }, [theme, mounted])
+
+  if (!mounted) {
+    return null
+  }
+
+  return (
+    <ThemeContext.Provider value={{ theme, setTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  )
+}
+
+export function useTheme() {
+  const context = useContext(ThemeContext)
+  if (context === undefined) {
+    throw new Error('useTheme must be used within a ThemeProvider')
+  }
+  return context
+}
+----
+
+[source,typescript]
+----
+// src/components/ThemeToggle.tsx
+'use client'
+
+import { useTheme } from './ThemeProvider'
+
+export default function ThemeToggle() {
+  const { theme, setTheme } = useTheme()
+
+  return (
+    <button
+      onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+      className="p-2 rounded-md bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+      aria-label="テーマ切り替え"
+    >
+      {theme === 'light' ? (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+        </svg>
+      ) : (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+        </svg>
+      )}
+    </button>
+  )
+}
+----
+
+==== Tailwind CSSでの配色設計
+
+[source,typescript]
+----
+// src/components/ColorPalette.tsx
+export default function ColorPalette() {
+  const colors = [
+    { name: 'Primary', bg: 'bg-blue-600', text: 'text-blue-600', border: 'border-blue-600' },
+    { name: 'Success', bg: 'bg-green-600', text: 'text-green-600', border: 'border-green-600' },
+    { name: 'Warning', bg: 'bg-yellow-600', text: 'text-yellow-600', border: 'border-yellow-600' },
+    { name: 'Error', bg: 'bg-red-600', text: 'text-red-600', border: 'border-red-600' },
+    { name: 'Gray', bg: 'bg-gray-600', text: 'text-gray-600', border: 'border-gray-600' },
+  ]
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      {colors.map(color => (
+        <div key={color.name} className="space-y-3">
+          <h3 className="font-semibold text-center">{color.name}</h3>
+          
+          {/* 背景色 */}
+          <div className={`${color.bg} h-16 rounded-lg flex items-center justify-center text-white font-medium`}>
+            Background
+          </div>
+          
+          {/* テキスト色 */}
+          <div className={`${color.text} border rounded-lg p-3 text-center font-medium`}>
+            Text Color
+          </div>
+          
+          {/* ボーダー色 */}
+          <div className={`${color.border} border-2 rounded-lg p-3 text-center`}>
+            Border
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+----
+
+==== レスポンシブレイアウトのベストプラクティス
+
+[source,typescript]
+----
+// src/components/ResponsiveLayout.tsx
+interface ResponsiveLayoutProps {
+  sidebar: React.ReactNode;
+  main: React.ReactNode;
+  aside?: React.ReactNode;
+}
+
+export default function ResponsiveLayout({ sidebar, main, aside }: ResponsiveLayoutProps) {
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex flex-col lg:flex-row gap-6 py-6">
+          {/* サイドバー */}
+          <aside className="w-full lg:w-64 lg:flex-shrink-0">
+            <div className="lg:sticky lg:top-6">
+              {sidebar}
+            </div>
+          </aside>
+          
+          {/* メインコンテンツ */}
+          <main className="flex-1 min-w-0">
+            {main}
+          </main>
+          
+          {/* 追加サイドバー（オプション） */}
+          {aside && (
+            <aside className="w-full lg:w-80 lg:flex-shrink-0">
+              <div className="lg:sticky lg:top-6">
+                {aside}
+              </div>
+            </aside>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+----
+
 == 実践演習
 
 === 演習5: ブログ一覧ページの作成
